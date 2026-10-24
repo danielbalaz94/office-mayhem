@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172127">
+  <title>Office Mayhem</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f7f4e9;
+      --muted: #b2c0bc;
+      --line: #42575a;
+      --mint: #9df1c2;
+      --orange: #ffbd73;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 28px 18px 36px;
+      color: var(--ink);
+      background: radial-gradient(ellipse at 50% -20%, #52645d 0, transparent 48%), #172127;
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+    }
+    main { width: min(960px, 100%); margin: 0 auto; }
+    .masthead { text-align: center; margin-bottom: 20px; }
+    .eyebrow {
+      margin: 0 0 7px;
+      color: var(--mint);
+      font-size: .76rem;
+      font-weight: 800;
+      letter-spacing: .19em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(2.2rem, 7vw, 4.2rem);
+      line-height: .98;
+      letter-spacing: -.055em;
+      text-shadow: 0 4px 0 #28363a;
+    }
+    h1 span { color: var(--orange); }
+    .subtitle { margin: 12px auto 0; color: var(--muted); font-size: 1rem; }
+    .game-card {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: #202d32;
+      box-shadow: 0 22px 65px #090e1290, inset 0 1px #ffffff0c;
+    }
+    .scoreboard {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #1b272c;
+    }
+    .stat {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .stat-label {
+      color: var(--muted);
+      font-size: .72rem;
+      font-weight: 800;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .stat-value { font-size: 1.35rem; font-weight: 900; font-variant-numeric: tabular-nums; }
+    .stat-value.time-low { color: #ff8b78; animation: blink .65s infinite alternate; }
+    @keyframes blink { to { opacity: .55; } }
+    .stage-task {
+      display: grid;
+      grid-template-columns: minmax(120px, .75fr) 2fr;
+      align-items: center;
+      gap: 8px 18px;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #26363a;
+    }
+    .stage-title { margin: 0; color: var(--orange); font-size: .76rem; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; }
+    .task-copy { margin: 3px 0 0; color: var(--ink); font-size: .9rem; font-weight: 700; }
+    .progress-track { height: 9px; overflow: hidden; border-radius: 99px; background: #111b20; }
+    .progress-fill { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #78dfa7, #e4d779); transition: width .2s; }
+    .side-task { grid-column: 2; margin: -3px 0 0; color: var(--muted); font-size: .76rem; }
+    .music-button {
+      min-height: 38px;
+      padding: 0 12px;
+      color: var(--ink);
+      background: #33474a;
+      box-shadow: 0 3px 0 #18262b;
+      font-size: .8rem;
+    }
+    .stage-wrap { position: relative; padding: 12px; }
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      aspect-ratio: 16 / 9;
+      border-radius: 12px;
+      background: #d8c9a6;
+      cursor: crosshair;
+      touch-action: manipulation;
+    }
+    .stage-note {
+      position: absolute;
+      right: 22px;
+      bottom: 20px;
+      padding: 6px 10px;
+      border: 1px solid #ffffff2d;
+      border-radius: 99px;
+      color: #fff9;
+      background: #1c2a31a6;
+      font-size: .7rem;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 20px 18px;
+    }
+    .message { min-height: 1.5em; margin: 0; color: #dbe5da; font-size: .93rem; }
+    button {
+      flex: 0 0 auto;
+      min-height: 46px;
+      padding: 0 22px;
+      border: 0;
+      border-radius: 12px;
+      color: #172127;
+      background: var(--mint);
+      box-shadow: 0 4px 0 #5dbb85;
+      font: inherit;
+      font-weight: 900;
+      cursor: pointer;
+      transition: transform .12s, filter .12s;
+    }
+    button:hover { filter: brightness(1.08); transform: translateY(-1px); }
+    button:active { transform: translateY(2px); box-shadow: 0 2px 0 #5dbb85; }
+    button:focus-visible, canvas:focus-visible { outline: 3px solid var(--orange); outline-offset: 3px; }
+    .howto {
+      display: flex;
+      justify-content: center;
+      gap: 8px 20px;
+      flex-wrap: wrap;
+      margin: 16px 0 0;
+      color: var(--muted);
+      font-size: .82rem;
+    }
+    .howto strong { color: var(--ink); }
+    @media (max-width: 560px) {
+      body { padding: 22px 12px 28px; }
+      .scoreboard { grid-template-columns: repeat(3, 1fr); padding: 12px 6px; gap: 10px 2px; }
+      .stat { flex-direction: column; align-items: center; gap: 1px; }
+      .stat-label { font-size: .62rem; }
+      .stat-value { font-size: 1.15rem; }
+      .stage-task { grid-template-columns: 1fr auto; padding: 11px 13px; gap: 8px; }
+      .side-task { grid-column: 1 / -1; margin: 0; }
+      .stage-wrap { padding: 8px; }
+      .controls { align-items: stretch; flex-direction: column; padding: 0 14px 16px; }
+      .message { text-align: center; }
+      button { width: 100%; }
+      .controls .music-button { width: auto; align-self: center; }
+      .stage-note { right: 14px; bottom: 15px; font-size: .6rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="masthead">
+      <p class="eyebrow">A very serious workplace simulation</p>
+      <h1>OFFICE <span>MAYHEM</span></h1>
+      <p class="subtitle">Catch the hot coffee. Cold coffee is a workplace hazard.</p>
+    </header>
+    <section class="game-card" aria-label="Office Mayhem game">
+      <div class="scoreboard" aria-live="polite">
+        <div class="stat"><span class="stat-label">Points</span><span class="stat-value" id="score">00</span></div>
+        <div class="stat"><span class="stat-label">Hot caught</span><span class="stat-value" id="caught">0/5</span></div>
+        <div class="stat"><span class="stat-label">Shift time</span><span class="stat-value" id="time">30</span></div>
+        <div class="stat"><span class="stat-label">HR incidents</span><span class="stat-value" id="misses">0</span></div>
+        <div class="stat"><span class="stat-label">Level</span><span class="stat-value" id="level">1/3</span></div>
+      </div>
+      <div class="stage-task">
+        <div>
+          <p class="stage-title" id="stageTitle">Level 1 · Easy</p>
+          <p class="task-copy" id="taskCopy">Catch 5 hot coffees</p>
+        </div>
+        <div class="progress-track" role="progressbar" aria-label="Hot coffee task progress" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0">
+          <div class="progress-fill" id="progress"></div>
+        </div>
+        <p class="side-task" id="sideTask">Bonus task: catch 2 expense reports for +4 points and +3 seconds.</p>
+      </div>
+      <div class="stage-wrap">
+        <canvas id="game" width="960" height="540" aria-label="Click steaming hot coffee; avoid iced coffee and catch expense reports for a bonus" tabindex="0"></canvas>
+        <span class="stage-note">HOT ☕ CATCH · ICED 🧊 AVOID · 📋 BONUS</span>
+      </div>
+      <div class="controls">
+        <p class="message" id="message" role="status">Your quarterly objective: prevent beverage-related chaos.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+          <button id="music" class="music-button" type="button" aria-pressed="false">♫ Music: Off</button>
+          <button id="start" type="button">Start the shift</button>
+        </div>
+      </div>
+    </section>
+    <p class="howto"><span><strong>Steaming coffee</strong> = catch it</span><span><strong>Iced coffee</strong> = avoid it (−2 sec)</span><span><strong>Expense reports</strong> = bonus points + time</span></p>
+  </main>
+  <script>
+    (() => {
+      "use strict";
+
+      const canvas = document.querySelector("#game");
+      const ctx = canvas.getContext("2d");
+      const scoreNode = document.querySelector("#score");
+      const caughtNode = document.querySelector("#caught");
+      const timeNode = document.querySelector("#time");
+      const missesNode = document.querySelector("#misses");
+      const levelNode = document.querySelector("#level");
+      const stageTitleNode = document.querySelector("#stageTitle");
+      const taskCopyNode = document.querySelector("#taskCopy");
+      const progressNode = document.querySelector("#progress");
+      const sideTaskNode = document.querySelector("#sideTask");
+      const messageNode = document.querySelector("#message");
+      const startButton = document.querySelector("#start");
+      const musicButton = document.querySelector("#music");
+      const W = canvas.width;
+      const H = canvas.height;
+      const LEVEL_SECONDS = 30;
+      const levels = [
+        { name: "Easy", goal: 5, spawn: 1.02, maxMugs: 4, speed: 1 },
+        { name: "Medium", goal: 8, spawn: .76, maxMugs: 5, speed: 1.32 },
+        { name: "Hard", goal: 12, spawn: .53, maxMugs: 6, speed: 1.7 }
+      ];
+      const mugs = [];
+      const particles = [];
+      const quips = [
+        "Hot coffee secured. Your hands are union-approved!",
+        "Excellent temperature discrimination!",
+        "Your manager is pretending not to be impressed.",
+        "That coffee had a meeting to get to.",
+        "HR has updated your caffeine-catching KPI.",
+        "The office fern believes in you."
+      ];
+      const missQuips = [
+        "A hot coffee escaped to a meeting that could've been an email.",
+        "The break room is now technically a break-out room.",
+        "One hot coffee has submitted its two weeks' notice.",
+        "That coffee has achieved work-life balance. You have not."
+      ];
+      let state = "ready";
+      let score = 0;
+      let misses = 0;
+      let timeLeft = LEVEL_SECONDS;
+      let levelIndex = 0;
+      let caughtThisLevel = 0;
+      let reportsThisLevel = 0;
+      let bonusClaimed = false;
+      let spawnClock = 0;
+      let lastFrame = 0;
+      let messageClock = 0;
+      let shake = 0;
+      let audioContext = null;
+      let musicOn = false;
+      let nextNoteAt = 0;
+      let noteIndex = 0;
+      const melody = [659.25, 783.99, 987.77, 783.99, 587.33, 698.46, 880, 698.46, 523.25, 659.25, 783.99, 659.25, 587.33, 698.46, 880, 1046.5];
+
+      function random(min, max) { return min + Math.random() * (max - min); }
+
+      function addTarget(now) {
+        const report = Math.random() < .1 && !mugs.some(mug => mug.kind === "report") && reportsThisLevel < 2;
+        const golden = !report && Math.random() < .1;
+        const kind = report ? "report" : golden ? "hot" : Math.random() < .33 ? "cold" : "hot";
+        const radius = report ? 24 : golden ? 27 : random(23, 30);
+        const angle = random(0, Math.PI * 2);
+        const level = levels[levelIndex];
+        const speed = (random(70, 112) + (LEVEL_SECONDS - timeLeft) * 2.1) * level.speed;
+        mugs.push({
+          x: random(radius + 12, W - radius - 12),
+          y: random(175, H - radius - 18),
+          r: radius,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          wobble: random(0, Math.PI * 2),
+          spin: random(-1, 1),
+          golden,
+          born: now,
+          hue: Math.floor(random(0, 360)),
+          kind
+        });
+      }
+
+      function drawBackground() {
+        const sky = ctx.createLinearGradient(0, 0, 0, H);
+        sky.addColorStop(0, "#bac9b8");
+        sky.addColorStop(.63, "#e4d6b8");
+        sky.addColorStop(.64, "#b78c60");
+        sky.addColorStop(1, "#92704f");
+        ctx.fillStyle = sky;
+        ctx.fillRect(0, 0, W, H);
+
+        // Office window and the suspiciously optimistic outside.
+        ctx.fillStyle = "#536861";
+        ctx.fillRect(35, 36, 285, 150);
+        ctx.fillStyle = "#a8d2c3";
+        ctx.fillRect(44, 45, 267, 132);
+        ctx.fillStyle = "#83b8aa";
+        ctx.beginPath();
+        ctx.arc(255, 77, 21, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#80a58b";
+        ctx.beginPath();
+        ctx.moveTo(44, 163); ctx.lineTo(105, 105); ctx.lineTo(159, 155);
+        ctx.lineTo(210, 111); ctx.lineTo(311, 170); ctx.lineTo(311, 177); ctx.lineTo(44, 177);
+        ctx.fill();
+        ctx.fillStyle = "#536861";
+        ctx.fillRect(174, 45, 7, 132);
+        ctx.fillRect(44, 107, 267, 7);
+
+        // Filing cabinet and the desk.
+        ctx.fillStyle = "#7d6248";
+        ctx.fillRect(748, 93, 157, 241);
+        ctx.fillStyle = "#a78963";
+        ctx.fillRect(758, 104, 137, 104);
+        ctx.fillRect(758, 219, 137, 104);
+        ctx.fillStyle = "#d9cba8";
+        ctx.fillRect(814, 150, 26, 5);
+        ctx.fillRect(814, 265, 26, 5);
+        ctx.fillStyle = "#705741";
+        ctx.fillRect(0, 394, W, 23);
+        ctx.fillStyle = "#664c38";
+        ctx.fillRect(0, 417, W, 123);
+
+        // Tiny desk plant, doing more work than anyone.
+        ctx.fillStyle = "#b78c60";
+        ctx.fillRect(672, 345, 38, 48);
+        ctx.fillStyle = "#658363";
+        for (let i = 0; i < 5; i++) {
+          ctx.save();
+          ctx.translate(691, 351);
+          ctx.rotate((i - 2) * .38);
+          ctx.beginPath();
+          ctx.ellipse(0, -20, 8, 21, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+        ctx.fillStyle = "#534536";
+        ctx.font = "bold 15px Trebuchet MS, sans-serif";
+        ctx.fillText("Q3 GOALS", 62, 212);
+        ctx.font = "12px Trebuchet MS, sans-serif";
+        ctx.fillText("1. Catch mugs", 62, 234);
+        ctx.fillText("2. Look busy", 62, 253);
+        ctx.fillText("3. Water fern", 62, 272);
+        ctx.fillText("it is watching", 76, 289);
+
+        // Desk clutter.
+        ctx.fillStyle = "#e9e0cc";
+        ctx.save();
+        ctx.translate(440, 447);
+        ctx.rotate(-.05);
+        ctx.fillRect(0, 0, 145, 68);
+        ctx.fillStyle = "#73847a";
+        ctx.font = "bold 13px Trebuchet MS, sans-serif";
+        ctx.fillText("URGENT", 12, 22);
+        ctx.font = "11px Trebuchet MS, sans-serif";
+        ctx.fillText("Re: the other email", 12, 42);
+        ctx.restore();
+
+        ctx.fillStyle = "#f7f4e9cc";
+        ctx.font = "bold 13px Trebuchet MS, sans-serif";
+        ctx.fillText(state === "running" ? "BREAK ROOM INCIDENT IN PROGRESS" : "BREAK ROOM · 9:01 AM", 351, 34);
+      }
+
+      function drawMug(mug, now) {
+        const age = (now - mug.born) / 1000;
+        const bob = Math.sin(age * 7 + mug.wobble) * 4;
+        const x = mug.x;
+        const y = mug.y + bob;
+        const r = mug.r;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(Math.sin(age * 4 + mug.wobble) * .12 + mug.spin * .12);
+
+        ctx.fillStyle = "#00000028";
+        ctx.beginPath();
+        ctx.ellipse(3, r * .92, r * .9, r * .24, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = mug.golden ? "#d39132" : `hsl(${mug.hue} 40% 40%)`;
+        ctx.lineWidth = r * .24;
+        ctx.beginPath();
+        ctx.arc(r * .72, -r * .08, r * .42, -Math.PI / 2, Math.PI / 2);
+        ctx.stroke();
+
+        const mugColor = mug.golden ? "#ffd264" : `hsl(${mug.hue} 56% 75%)`;
+        const mugDark = mug.golden ? "#d8942f" : `hsl(${mug.hue} 43% 48%)`;
+        ctx.fillStyle = mugDark;
+        ctx.beginPath();
+        ctx.roundRect(-r * .68, -r * .72, r * 1.38, r * 1.48, [5, 5, 11, 11]);
+        ctx.fill();
+        ctx.fillStyle = mugColor;
+        ctx.beginPath();
+        ctx.roundRect(-r * .76, -r * .78, r * 1.32, r * 1.45, [5, 5, 10, 10]);
+        ctx.fill();
+
+        ctx.fillStyle = "#55443a";
+        ctx.beginPath();
+        ctx.ellipse(-r * .1, -r * .76, r * .62, r * .16, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = mug.golden ? "#9b5826" : "#694638";
+        ctx.beginPath();
+        ctx.ellipse(-r * .1, -r * .78, r * .49, r * .105, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Determined little face.
+        ctx.fillStyle = "#273337";
+        ctx.beginPath();
+        ctx.arc(-r * .24, -r * .05, r * .075, 0, Math.PI * 2);
+        ctx.arc(r * .16, -r * .05, r * .075, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#273337";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(-r * .04, r * .12, r * .17, .12, Math.PI - .12);
+        ctx.stroke();
+
+        if (mug.kind === "cold") {
+          ctx.fillStyle = "#9de9f0";
+          ctx.font = `bold ${Math.round(r * .8)}px sans-serif`;
+          ctx.textAlign = "center";
+          ctx.fillText("❄", -r * .1, r * .25);
+          ctx.fillStyle = "#a6eafa";
+          ctx.fillRect(r * .27, -r * .96, 4, r * .54);
+        } else if (mug.kind === "report") {
+          ctx.fillStyle = "#273337";
+          ctx.font = `bold ${Math.round(r * .68)}px sans-serif`;
+          ctx.textAlign = "center";
+          ctx.fillText("!", 0, r * .28);
+        } else if (mug.golden) {
+          ctx.fillStyle = "#fff4b0";
+          ctx.font = `bold ${Math.round(r * .48)}px sans-serif`;
+          ctx.textAlign = "center";
+          ctx.fillText("+", 0, r * .62);
+        }
+        ctx.restore();
+
+        ctx.strokeStyle = "#fff8";
+        ctx.lineWidth = 2;
+        for (let i = 0; mug.kind === "hot" && i < 2; i++) {
+          const sx = x - 7 + i * 14;
+          const sy = y - r - 8;
+          ctx.beginPath();
+          ctx.moveTo(sx, sy);
+          ctx.bezierCurveTo(sx - 8, sy - 10, sx + 7, sy - 15, sx, sy - 23);
+          ctx.stroke();
+        }
+      }
+
+      function drawParticles(dt) {
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+          p.life -= dt;
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.vy += 80 * dt;
+          if (p.life <= 0) { particles.splice(i, 1); continue; }
+          ctx.globalAlpha = Math.min(1, p.life * 2);
+          ctx.fillStyle = p.color;
+          ctx.font = `bold ${p.size}px Trebuchet MS, sans-serif`;
+          ctx.textAlign = "center";
+          ctx.fillText(p.text, p.x, p.y);
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      function drawOverlay() {
+        if (state === "running") return;
+        ctx.fillStyle = "#18272dbb";
+        ctx.fillRect(0, 0, W, H);
+        ctx.textAlign = "center";
+        if (state === "ready") {
+          ctx.fillStyle = "#fff8e9";
+          ctx.font = "900 39px Trebuchet MS, sans-serif";
+          ctx.fillText("THE COFFEE IS MAKING A BREAK FOR IT", W / 2, 241);
+          ctx.fillStyle = "#dbe8d9";
+          ctx.font = "20px Trebuchet MS, sans-serif";
+          ctx.fillText("Catch only steaming hot coffees. Avoid iced coffee!", W / 2, 281);
+          ctx.font = "16px Trebuchet MS, sans-serif";
+          ctx.fillText("Grab expense reports for bonus points and extra time.", W / 2, 311);
+        } else {
+          ctx.fillStyle = "#fff8e9";
+          ctx.font = "900 48px Trebuchet MS, sans-serif";
+          ctx.fillText(state === "complete" ? "ALL SHIFTS SURVIVED!" : "SHIFT OVER!", W / 2, 216);
+          ctx.fillStyle = "#ffd17c";
+          ctx.font = "900 30px Trebuchet MS, sans-serif";
+          ctx.fillText(`${score} mugs caught`, W / 2, 265);
+          ctx.fillStyle = "#e5e6d9";
+          ctx.font = "19px Trebuchet MS, sans-serif";
+          const review = state === "complete" ? "You are now Chief Beverage Officer!" :
+            score >= 25 ? "Promotion to Senior Mug Wrangler!" :
+            score >= 12 ? "A respectable amount of caffeinated chaos." :
+            "Your fern has requested a performance review.";
+          ctx.fillText(review, W / 2, 302);
+        }
+        ctx.textAlign = "start";
+      }
+
+      function render(now, dt) {
+        ctx.save();
+        if (shake > 0) {
+          ctx.translate(random(-shake, shake), random(-shake, shake));
+          shake = Math.max(0, shake - 30 * dt);
+        }
+        drawBackground();
+        for (const mug of mugs) drawMug(mug, now);
+        drawParticles(dt);
+        drawOverlay();
+        ctx.restore();
+      }
+
+      function setMessage(text, seconds = 2.2) {
+        messageNode.textContent = text;
+        messageClock = seconds;
+      }
+
+      function ensureAudio() {
+        if (!audioContext) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) audioContext = new AudioContextClass();
+        }
+        if (audioContext?.state === "suspended") audioContext.resume();
+      }
+
+      function playTone(frequency, duration = .12, type = "sine", volume = .035) {
+        if (!audioContext) return;
+        const oscillator = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        const now = audioContext.currentTime;
+        oscillator.type = type;
+        oscillator.frequency.setValueAtTime(frequency, now);
+        gain.gain.setValueAtTime(volume, now);
+        gain.gain.exponentialRampToValueAtTime(.001, now + duration);
+        oscillator.connect(gain);
+        gain.connect(audioContext.destination);
+        oscillator.start(now);
+        oscillator.stop(now + duration);
+      }
+
+      function scheduleMusic() {
+        if (!musicOn || !audioContext || audioContext.state !== "running") return;
+        while (nextNoteAt < audioContext.currentTime + .12) {
+          const level = levels[levelIndex];
+          const note = melody[noteIndex % melody.length] * (levelIndex === 2 ? 1.125 : 1);
+          const oscillator = audioContext.createOscillator();
+          const gain = audioContext.createGain();
+          oscillator.type = "triangle";
+          oscillator.frequency.setValueAtTime(note, nextNoteAt);
+          gain.gain.setValueAtTime(.0001, nextNoteAt);
+          gain.gain.linearRampToValueAtTime(.025, nextNoteAt + .025);
+          gain.gain.exponentialRampToValueAtTime(.0001, nextNoteAt + .19);
+          oscillator.connect(gain);
+          gain.connect(audioContext.destination);
+          oscillator.start(nextNoteAt);
+          oscillator.stop(nextNoteAt + .2);
+          nextNoteAt += levelIndex === 2 ? .2 : .25;
+          noteIndex++;
+        }
+      }
+
+      function updateTaskHud() {
+        const level = levels[levelIndex];
+        stageTitleNode.textContent = `Level ${levelIndex + 1} · ${level.name}`;
+        taskCopyNode.textContent = `Catch ${level.goal} hot coffees`;
+        caughtNode.textContent = `${caughtThisLevel}/${level.goal}`;
+        const progress = document.querySelector(".progress-track");
+        progress.setAttribute("aria-valuemax", String(level.goal));
+        progress.setAttribute("aria-valuenow", String(caughtThisLevel));
+        progressNode.style.width = `${Math.min(100, caughtThisLevel / level.goal * 100)}%`;
+        levelNode.textContent = `${levelIndex + 1}/3`;
+        sideTaskNode.textContent = bonusClaimed
+          ? "Bonus task complete! HR has filed your paperwork under “miracles.”"
+          : `Bonus task: catch 2 expense reports (${reportsThisLevel}/2) for +4 points and +3 seconds.`;
+      }
+
+      function advanceLevel() {
+        const finishedName = levels[levelIndex].name;
+        if (levelIndex === levels.length - 1) {
+          state = "complete";
+          timeLeft = 0;
+          startButton.textContent = "Start another shift";
+          setMessage("All three levels cleared! The coffee machine is your new direct report.", 99);
+          updateHud();
+          return;
+        }
+        levelIndex++;
+        caughtThisLevel = 0;
+        reportsThisLevel = 0;
+        bonusClaimed = false;
+        timeLeft = LEVEL_SECONDS;
+        mugs.length = 0;
+        spawnClock = .6;
+        setMessage(`${finishedName} shift cleared! Management has made the coffee faster.`, 3);
+        updateHud();
+      }
+
+      function endGame() {
+        state = "ended";
+        timeLeft = Math.max(0, timeLeft);
+        startButton.textContent = "Retry the shift";
+        setMessage(score >= 20 ? "Your bonus is one (1) lukewarm coffee." : "The coffee escaped. The fern has notes.", 99);
+      }
+
+      function update(dt, now) {
+        if (state !== "running") return;
+        timeLeft -= dt;
+        if (timeLeft <= 0) {
+          timeLeft = 0;
+          endGame();
+          updateHud();
+          return;
+        }
+        spawnClock -= dt;
+        if (spawnClock <= 0 && mugs.length < levels[levelIndex].maxMugs) {
+          addTarget(now);
+          spawnClock = levels[levelIndex].spawn;
+        }
+        for (let i = mugs.length - 1; i >= 0; i--) {
+          const mug = mugs[i];
+          mug.x += mug.vx * dt;
+          mug.y += mug.vy * dt;
+          const margin = mug.r + 8;
+          if (mug.x < margin) { mug.x = margin; mug.vx = Math.abs(mug.vx); }
+          if (mug.x > W - margin) { mug.x = W - margin; mug.vx = -Math.abs(mug.vx); }
+          if (mug.y < 151 + mug.r) { mug.y = 151 + mug.r; mug.vy = Math.abs(mug.vy); }
+          if (mug.y > 382 - mug.r) { mug.y = 382 - mug.r; mug.vy = -Math.abs(mug.vy); }
+          if (now - mug.born > 6800) {
+            mugs.splice(i, 1);
+            if (mug.kind === "hot") {
+              misses++;
+              shake = 4;
+              setMessage(missQuips[Math.floor(Math.random() * missQuips.length)]);
+            }
+          }
+        }
+        updateHud();
+      }
+
+      function updateHud() {
+        scoreNode.textContent = String(score).padStart(2, "0");
+        timeNode.textContent = String(Math.ceil(timeLeft)).padStart(2, "0");
+        timeNode.classList.toggle("time-low", state === "running" && timeLeft <= 8);
+        missesNode.textContent = String(misses);
+        updateTaskHud();
+      }
+
+      function loop(now) {
+        const dt = Math.min(.04, Math.max(0, (now - lastFrame) / 1000));
+        lastFrame = now;
+        if (messageClock > 0) {
+          messageClock -= dt;
+          if (messageClock <= 0 && state === "running") {
+            messageNode.textContent = "Catch the mugs. Ignore the passive-aggressive calendar invite.";
+          }
+        }
+        update(dt, now);
+        scheduleMusic();
+        render(now, dt);
+        requestAnimationFrame(loop);
+      }
+
+      function startGame() {
+        score = 0;
+        misses = 0;
+        timeLeft = LEVEL_SECONDS;
+        levelIndex = 0;
+        caughtThisLevel = 0;
+        reportsThisLevel = 0;
+        bonusClaimed = false;
+        spawnClock = 0;
+        mugs.length = 0;
+        particles.length = 0;
+        state = "running";
+        startButton.textContent = "Restart shift";
+        setMessage("Go! The mugs have already booked a meeting about this.", 3);
+        updateHud();
+        canvas.focus({ preventScroll: true });
+      }
+
+      function pointerPosition(event) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+          x: (event.clientX - rect.left) * W / rect.width,
+          y: (event.clientY - rect.top) * H / rect.height
+        };
+      }
+
+      canvas.addEventListener("pointerdown", event => {
+        if (state !== "running") return;
+        event.preventDefault();
+        const point = pointerPosition(event);
+        for (let i = mugs.length - 1; i >= 0; i--) {
+          const mug = mugs[i];
+          const dx = point.x - mug.x;
+          const dy = point.y - mug.y;
+          if (dx * dx + dy * dy <= (mug.r + 9) ** 2) {
+            mugs.splice(i, 1);
+            if (mug.kind === "cold") {
+              misses++;
+              timeLeft = Math.max(0, timeLeft - 2);
+              shake = 7;
+              playTone(145, .22, "sawtooth", .045);
+              setMessage("ICED COFFEE! Two seconds lost to the workplace hazard report.", 2.5);
+              updateHud();
+              break;
+            }
+            if (mug.kind === "report") {
+              reportsThisLevel++;
+              score += 2;
+              timeLeft = Math.min(LEVEL_SECONDS, timeLeft + 1.5);
+              playTone(880, .1, "sine");
+              setMessage("Expense report filed! Finance has acknowledged receipt.", 2);
+              if (reportsThisLevel >= 2 && !bonusClaimed) {
+                bonusClaimed = true;
+                score += 4;
+                timeLeft = Math.min(LEVEL_SECONDS, timeLeft + 3);
+                setMessage("BONUS TASK DONE! +4 points and +3 seconds. HR is stunned.", 3);
+              }
+              updateHud();
+              break;
+            }
+            score += mug.golden ? 3 : 1;
+            caughtThisLevel++;
+            playTone(mug.golden ? 1046 : 740, .1, "triangle");
+            for (let n = 0; n < 9; n++) {
+              const a = Math.random() * Math.PI * 2;
+              const speed = random(35, 130);
+              particles.push({
+                x: mug.x, y: mug.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
+                life: random(.45, .9), size: random(13, 21),
+                color: mug.golden ? "#ffd264" : `hsl(${mug.hue} 65% 72%)`,
+                text: mug.golden ? "★" : "☕"
+              });
+            }
+            setMessage(mug.golden ? "GOLDEN HOT COFFEE! Three points. Wear the tiny crown!" :
+              quips[Math.floor(Math.random() * quips.length)], 1.8);
+            const levelComplete = caughtThisLevel >= levels[levelIndex].goal;
+            updateHud();
+            if (levelComplete) advanceLevel();
+            break;
+          }
+        }
+      });
+
+      musicButton.addEventListener("click", () => {
+        ensureAudio();
+        if (!audioContext) {
+          setMessage("This browser cannot play the office jazz. The fern will hum instead.", 3);
+          return;
+        }
+        musicOn = !musicOn;
+        musicButton.textContent = musicOn ? "♫ Music: On" : "♫ Music: Off";
+        musicButton.setAttribute("aria-pressed", String(musicOn));
+        if (musicOn) {
+          nextNoteAt = audioContext.currentTime + .05;
+          setMessage("Office elevator jazz activated. The fern is tapping along.", 2.5);
+        } else {
+          setMessage("Quiet mode. You can hear the quarterly goals breathing.", 2.5);
+        }
+      });
+
+      startButton.addEventListener("click", startGame);
+      updateHud();
+      requestAnimationFrame(now => {
+        lastFrame = now;
+        loop(now);
+      });
+    })();
+  </script>
+</body>
+</html>
