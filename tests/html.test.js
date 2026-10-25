@@ -12,6 +12,7 @@ test("HTML stays clean and loads its separated stylesheet and JavaScript module"
   assert.match(html, /id="coffeeObjective"/);
   assert.match(html, /id="activityObjective"/);
   assert.match(html, /id="plantRequestStatus"[^>]*aria-live="polite"/);
+  assert.match(html, /id="fullscreen"/);
   assert.match(html, /type="range"[^>]*aria-label="Sound volume"/);
   assert.doesNotMatch(html, /missionSelect/);
   assert.doesNotMatch(html, /<style(?:\s|>)/i);

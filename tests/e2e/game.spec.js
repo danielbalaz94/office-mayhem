@@ -29,15 +29,20 @@ async function tapCanvas(page, x, y) {
 }
 
 async function tapRequestedPlant(page, touch = false) {
-  const plant = await page.locator("#plantRequestStatus").evaluate(node => ({
-    x: Number(node.dataset.requestingX),
-    y: Number(node.dataset.requestingY)
-  }));
+  const status = page.locator("#plantRequestStatus");
+  await page.locator("#game").scrollIntoViewIfNeeded();
   const canvas = await page.locator("#game").boundingBox();
-  if (touch) {
-    await page.touchscreen.tap(canvas.x + canvas.width * plant.x / 960, canvas.y + canvas.height * plant.y / 540);
-  } else {
-    await page.mouse.click(canvas.x + canvas.width * plant.x / 960, canvas.y + canvas.height * plant.y / 540);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const plant = await status.evaluate(node => ({
+      x: Number(node.dataset.requestingX),
+      y: Number(node.dataset.requestingY)
+    }));
+    const x = canvas.x + canvas.width * plant.x / 960;
+    const y = canvas.y + canvas.height * plant.y / 540;
+    if (touch) await page.touchscreen.tap(x, y);
+    else await page.mouse.click(x, y);
+    if ((await status.textContent()).includes("watered")) return;
+    await page.waitForTimeout(80);
   }
 }
 
@@ -140,6 +145,33 @@ test("mission starts reroll the locally generated office, plants, and weather", 
   const secondScene = await canvas.getAttribute("aria-label");
   expect(secondScene).toContain("Sunroom Annex; day, snow; 3 plants and flowers.");
   expect(secondScene).not.toBe(firstScene);
+});
+
+test("fullscreen expands the game to the laptop viewport and the exit control restores it", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chromium", "Fullscreen sizing is checked in the desktop browser project.");
+  await chooseMission(page, 0);
+  const canvas = page.locator("#game");
+  const normalCanvas = await canvas.boundingBox();
+  await page.getByRole("button", { name: "Enter fullscreen" }).click();
+  await expect.poll(() => page.evaluate(() =>
+    document.fullscreenElement === document.querySelector(".app"))).toBe(true);
+  await expect(page.getByRole("button", { name: "Exit fullscreen" })).toHaveAttribute("aria-pressed", "true");
+
+  const fullscreenLayout = await page.evaluate(() => ({
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    app: document.querySelector(".app").getBoundingClientRect().toJSON(),
+    canvas: document.querySelector("#game").getBoundingClientRect().toJSON()
+  }));
+  expect(fullscreenLayout.app.width).toBeCloseTo(fullscreenLayout.viewportWidth, 0);
+  expect(fullscreenLayout.app.height).toBeCloseTo(fullscreenLayout.viewportHeight, 0);
+  expect(fullscreenLayout.canvas.width).toBeGreaterThan(normalCanvas.width);
+  expect(fullscreenLayout.canvas.height).toBeGreaterThan(normalCanvas.height);
+  expect(fullscreenLayout.canvas.width / fullscreenLayout.canvas.height).toBeCloseTo(16 / 9, 1);
+
+  await page.getByRole("button", { name: "Exit fullscreen" }).click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBe(null);
+  await expect(page.getByRole("button", { name: "Enter fullscreen" })).toHaveAttribute("aria-pressed", "false");
 });
 
 test("legacy campaign progress migrates and unlocks the next mission by completion", async ({ page }) => {

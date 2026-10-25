@@ -27,6 +27,7 @@ import {
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
 const nodes = {
+  app: document.querySelector(".app"),
   score: document.querySelector("#score"),
   caught: document.querySelector("#caught"),
   time: document.querySelector("#time"),
@@ -45,6 +46,7 @@ const nodes = {
   plantRequestStatus: document.querySelector("#plantRequestStatus"),
   message: document.querySelector("#message"),
   start: document.querySelector("#start"),
+  fullscreen: document.querySelector("#fullscreen"),
   music: document.querySelector("#music"),
   volume: document.querySelector("#volume"),
   volumeValue: document.querySelector("#volumeValue"),
@@ -1296,6 +1298,28 @@ nodes.closeMissionBrowser.addEventListener("click", () => nodes.missionBrowser.c
 nodes.previousMission.addEventListener("click", () => moveMission(-1));
 nodes.nextMission.addEventListener("click", () => moveMission(1));
 nodes.start.addEventListener("click", startMission);
+function syncFullscreenButton() {
+  const active = document.fullscreenElement === nodes.app;
+  nodes.fullscreen.setAttribute("aria-pressed", String(active));
+  nodes.fullscreen.setAttribute("aria-label", active ? "Exit fullscreen" : "Enter fullscreen");
+  nodes.fullscreen.textContent = active ? "Exit fullscreen" : "Full screen";
+}
+
+nodes.fullscreen.addEventListener("click", async () => {
+  try {
+    if (document.fullscreenElement === nodes.app) {
+      await document.exitFullscreen();
+    } else if (typeof nodes.app.requestFullscreen === "function" && document.fullscreenEnabled) {
+      await nodes.app.requestFullscreen();
+    } else {
+      setMessage("Fullscreen is not available in this browser.", 3);
+    }
+  } catch (error) {
+    console.error("Could not change fullscreen mode.", error);
+    setMessage("Fullscreen could not be changed. Check your browser permissions.", 3);
+  }
+});
+document.addEventListener("fullscreenchange", syncFullscreenButton);
 nodes.music.addEventListener("click", async () => {
   try {
     const enabled = await audio.toggleMusic();
@@ -1337,6 +1361,7 @@ function loop(now) {
 updateCanvasDescription();
 updateMissionPicker();
 updateHud();
+syncFullscreenButton();
 nodes.missionBrowser.showModal();
 requestAnimationFrame(now => {
   state.lastFrame = now;
