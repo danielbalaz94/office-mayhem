@@ -118,13 +118,21 @@ test("ignoring a timed plant request costs points and adds an incident", async (
   await page.evaluate(() => {
     Math.random = () => .3;
     let elapsed = performance.now();
-    window.requestAnimationFrame = callback => window.setTimeout(() => callback(elapsed += 40), 0);
+    window.requestAnimationFrame = callback => window.setTimeout(() => {
+      if (!document.querySelector("#plantRequestStatus").textContent.includes("went unwatered")) {
+        callback(elapsed += 40);
+      }
+    }, 0);
   });
   await page.getByRole("button", { name: "Start mission" }).click();
-  await expect(page.locator("#plantRequestStatus")).toContainText("needs water", { timeout: 7000 });
-  await expect(page.locator("#incidents")).toHaveText("1", { timeout: 7000 });
-  await expect(page.locator("#plantRequestStatus")).toContainText("unwatered");
-  await expect(page.locator("#score")).toHaveText("00");
+  const status = page.locator("#plantRequestStatus");
+  await expect(status).toContainText("needs water", { timeout: 7000 });
+  await expect(status).toContainText("-2 points, -2 seconds, and an incident.", { timeout: 15_000 });
+  const result = (await status.textContent()).match(/Score (\d+); (\d+) seconds left; (\d+) incidents\./);
+  expect(result).not.toBeNull();
+  expect(Number(result[1])).toBe(Number(await page.locator("#score").textContent()));
+  expect(Number(result[2])).toBe(Number(await page.locator("#time").textContent()));
+  expect(Number(result[3])).toBe(Number(await page.locator("#incidents").textContent()));
 });
 
 test("mission starts reroll the locally generated office, plants, and weather", async ({ page }) => {

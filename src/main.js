@@ -423,15 +423,18 @@ function updatePlantRequests(dt) {
     state.plantRequestRemaining -= dt;
     if (state.plantRequestRemaining <= 0) {
       const plant = state.mission.scene.plants.find(candidate => candidate.id === state.requestedPlantId);
-      const penalty = applyPlantRequestExpiry();
+      const penalty = applyPlantRequestExpiry(state.score, state.timeLeft, state.incidents);
       state.requestedPlantId = null;
       state.plantRequestRemaining = 0;
       state.plantRequestClock = 3;
-      state.score = Math.max(0, state.score + penalty.points);
-      state.timeLeft = Math.max(0, state.timeLeft + penalty.timeDelta);
-      state.incidents += penalty.incidents;
-      setPlantRequestStatus(`The ${getPlantName(plant?.kind)} went unwatered: ${penalty.points} points and ${penalty.timeDelta} seconds.`);
-      setMessage(`Plant request missed: ${penalty.points} points and ${penalty.timeDelta} seconds.`, 3);
+      state.score = penalty.score;
+      state.timeLeft = penalty.timeLeft;
+      state.incidents = penalty.incidents;
+      setPlantRequestStatus(
+        `The ${getPlantName(plant?.kind)} went unwatered: -2 points, -2 seconds, and an incident. ` +
+        `Score ${state.score}; ${Math.ceil(state.timeLeft)} seconds left; ${state.incidents} incidents.`
+      );
+      setMessage("Plant request missed: -2 points and -2 seconds; incident added.", 3);
       if (state.timeLeft <= 0) finishFailedMission();
     }
   } else {

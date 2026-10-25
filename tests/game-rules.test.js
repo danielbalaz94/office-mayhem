@@ -170,7 +170,9 @@ test("ignoring phones and pests incurs penalties while harder missions penalize 
 });
 
 test("missed plant requests cost points, time, and an incident", () => {
-  assert.deepEqual(applyPlantRequestExpiry(), { points: -2, timeDelta: -2, incidents: 1 });
+  assert.deepEqual(applyPlantRequestExpiry(5, 30, 2), { score: 3, timeLeft: 28, incidents: 3 });
+  assert.deepEqual(applyPlantRequestExpiry(1, 1, 0), { score: 0, timeLeft: 0, incidents: 1 });
+  assert.throws(() => applyPlantRequestExpiry(-1, 1, 0), RangeError);
 });
 
 test("a mission requires coffee and its selected activity, not plant watering", () => {

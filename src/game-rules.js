@@ -392,8 +392,17 @@ export function applyTargetExpiry(kind, mission) {
   return { timeDelta: 0, incidents: kind === "hot" ? 1 : 0 };
 }
 
-export function applyPlantRequestExpiry() {
-  return { points: -2, timeDelta: -2, incidents: 1 };
+export function applyPlantRequestExpiry(score, timeLeft, incidents) {
+  if (!Number.isFinite(score) || score < 0 ||
+      !Number.isFinite(timeLeft) || timeLeft < 0 ||
+      !Number.isSafeInteger(incidents) || incidents < 0) {
+    throw new RangeError("Plant request expiry state must contain non-negative score, time, and incidents.");
+  }
+  return {
+    score: Math.max(0, score - 2),
+    timeLeft: Math.max(0, timeLeft - 2),
+    incidents: incidents + 1
+  };
 }
 
 export function isMissionComplete(mission, progress) {
