@@ -1,0 +1,175 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  MISSION_COUNT,
+  TASKS,
+  applyTargetExpiry,
+  applyTargetHit,
+  clampMissionTime,
+  createEmptyProgress,
+  createMission,
+  getAdjacentMissionIndex,
+  getMissionBadges,
+  getMissionEndState,
+  getTargetSpeed,
+  getUnlockedMissionIndices,
+  isMissionComplete,
+  migrateLegacyProgress,
+  recordMissionResult,
+  sanitizeProgress
+} from "../src/game-rules.js";
+
+test("procedural missions are deterministic for the same result and seed", () => {
+  assert.deepEqual(createMission(2, 40, 1234), createMission(2, 40, 1234));
+  const variants = new Set(Array.from({ length: 20 }, (_, seed) =>
+    JSON.stringify(createMission(2, 40, seed + 1))));
+  assert.ok(variants.size > 1);
+  assert.ok(new Set([...variants].map(value => JSON.parse(value).durationSeconds)).size > 1);
+});
+
+test("nine fixed missions progressively introduce distinct activity types", () => {
+  assert.equal(MISSION_COUNT, 9);
+  assert.deepEqual(TASKS, ["phone", "reports", "phone", "reports", "phone", "reports", "printer", "sorting", "pests"]);
+  assert.ok(createMission(8, 0, 9).sortingSequence.length === 0);
+  assert.equal(createMission(7, 0, 9).sortingSequence.length, 3);
+  assert.equal(createMission(6, 0, 9).taskGoal, 3);
+  assert.equal(createMission(8, 0, 9).taskGoal, 4);
+});
+
+test("later missions are measurably faster and more demanding than early missions", () => {
+  const easy = createMission(0, 0, 9);
+  const hard = createMission(8, 0, 9);
+  assert.ok(hard.durationSeconds > easy.durationSeconds);
+  assert.ok(hard.coffeeGoal > easy.coffeeGoal);
+  assert.ok(hard.speedMultiplier > easy.speedMultiplier);
+  assert.ok(hard.spawnInterval < easy.spawnInterval);
+  assert.ok(hard.bonusSpeedMultiplier > hard.speedMultiplier);
+  assert.equal(easy.waterGoal, 1);
+  for (const kind of ["hot", "phone", "report"]) {
+    assert.ok(getTargetSpeed(100, hard, kind) > getTargetSpeed(100, easy, kind));
+  }
+  assert.ok(getTargetSpeed(100, easy, "hot", true) > getTargetSpeed(100, easy, "hot"));
+  assert.throws(() => getTargetSpeed(100, easy, "bug"), RangeError);
+});
+
+test("stronger career results can increase target difficulty without unlocking missions", () => {
+  const early = createMission(2, 0, 8);
+  const successful = createMission(2, 100, 8);
+  assert.ok(successful.difficultyTier > early.difficultyTier);
+  assert.ok(successful.speedMultiplier > early.speedMultiplier);
+  assert.ok(successful.spawnInterval < early.spawnInterval);
+  assert.deepEqual(getUnlockedMissionIndices({ careerPoints: 999 }), [0]);
+});
+
+test("invalid mission indices are rejected", () => {
+  assert.throws(() => createMission(-1), RangeError);
+  assert.throws(() => createMission(MISSION_COUNT), RangeError);
+  assert.throws(() => getMissionBadges(MISSION_COUNT, true, 0), RangeError);
+});
+
+test("completing a mission unlocks the next; failed runs and scores do not", () => {
+  const initial = createEmptyProgress();
+  assert.deepEqual(getUnlockedMissionIndices(initial), [0]);
+  const failed = recordMissionResult(initial, 0, 500, false, 1);
+  assert.deepEqual(getUnlockedMissionIndices(failed), [0]);
+  const complete = recordMissionResult(failed, 0, 3, true, 0);
+  assert.deepEqual(getUnlockedMissionIndices(complete), [0, 1]);
+  assert.deepEqual(complete.perfectMissions, [0]);
+  assert.ok(complete.earnedBadges.includes("incident-free-0"));
+});
+
+test("previous and next mission navigation selects the closest unlocked mission", () => {
+  const progress = { completedMissions: [0, 1, 2], legacyUnlockedMissions: [] };
+  assert.equal(getAdjacentMissionIndex(2, -1, progress), 1);
+  assert.equal(getAdjacentMissionIndex(2, 1, progress), 3);
+  assert.equal(getAdjacentMissionIndex(0, -1, progress), undefined);
+  assert.equal(getAdjacentMissionIndex(8, 1, progress), undefined);
+  assert.throws(() => getAdjacentMissionIndex(2, 0, progress), RangeError);
+});
+
+test("mission results retain best scores and completion badges without score-gated unlocks", () => {
+  const first = recordMissionResult(createEmptyProgress(), 0, 15, true, 2);
+  const replay = recordMissionResult(first, 0, 4, true, 0);
+  assert.equal(replay.careerPoints, 19);
+  assert.equal(replay.bestScores[0], 15);
+  assert.deepEqual(replay.completedMissions, [0]);
+  assert.deepEqual(replay.perfectMissions, [0]);
+  assert.deepEqual(replay.earnedBadges, ["mission-0-complete", "incident-free-0"]);
+  assert.deepEqual(getUnlockedMissionIndices(replay), [0, 1]);
+  assert.throws(() => recordMissionResult(first, 1, -2), RangeError);
+});
+
+test("legacy score unlocks and six-mission saves migrate without losing progress", () => {
+  const migrated = migrateLegacyProgress({
+    careerPoints: 110,
+    bestScores: [4, 5, 6, 7, 8, 9],
+    completedMissions: [0, 2, 5]
+  });
+  assert.deepEqual(migrated.bestScores.slice(0, 6), [4, 5, 6, 7, 8, 9]);
+  assert.equal(migrated.bestScores.length, 9);
+  assert.deepEqual(migrated.completedMissions, [0, 2, 5]);
+  assert.deepEqual(getUnlockedMissionIndices(migrated), [0, 1, 2, 3, 4, 5, 6]);
+});
+
+test("saved campaign data is sanitized before use", () => {
+  assert.deepEqual(
+    sanitizeProgress({ careerPoints: 17, bestScores: [4, -1], completedMissions: [1, 1, 99, "2"], perfectMissions: [1, -1], earnedBadges: ["ok", 2] }),
+    {
+      careerPoints: 17,
+      bestScores: [4, 0, 0, 0, 0, 0, 0, 0, 0],
+      completedMissions: [1],
+      perfectMissions: [1],
+      earnedBadges: ["ok"],
+      legacyUnlockedMissions: []
+    }
+  );
+  assert.deepEqual(sanitizeProgress(null), createEmptyProgress());
+});
+
+test("coffee, report, phone, pest, and iced targets have distinct tested rewards", () => {
+  assert.deepEqual(applyTargetHit("hot"), { points: 1, timeDelta: 0, incidents: 0, progress: "coffee" });
+  assert.equal(applyTargetHit("hot", true).points, 3);
+  assert.equal(applyTargetHit("cold").timeDelta, -2);
+  assert.equal(applyTargetHit("report").progress, "reports");
+  assert.equal(applyTargetHit("phone").progress, "phone");
+  assert.equal(applyTargetHit("bug").progress, "pests");
+  assert.throws(() => applyTargetHit("mystery"), RangeError);
+});
+
+test("ignoring phones and pests incurs penalties while harder missions penalize more", () => {
+  const easy = createMission(0, 0, 1);
+  const hard = createMission(4, 120, 1);
+  assert.equal(applyTargetExpiry("phone", easy).timeDelta, -easy.phoneExpiryPenalty);
+  assert.ok(applyTargetExpiry("phone", hard).timeDelta < applyTargetExpiry("phone", easy).timeDelta);
+  assert.deepEqual(applyTargetExpiry("bug", easy), { timeDelta: -2, incidents: 1 });
+  assert.equal(applyTargetExpiry("hot", easy).incidents, 1);
+});
+
+test("a mission requires coffee, watering, and its selected activity", () => {
+  for (const missionIndex of [0, 6, 7, 8]) {
+    const mission = createMission(missionIndex, 20, 77);
+    const progress = { coffee: mission.coffeeGoal, water: mission.waterGoal, [mission.taskKind]: mission.taskGoal };
+    assert.equal(isMissionComplete(mission, progress), true);
+    assert.equal(isMissionComplete(mission, { ...progress, water: mission.waterGoal - 1 }), false);
+    assert.equal(isMissionComplete(mission, { ...progress, [mission.taskKind]: mission.taskGoal - 1 }), false);
+  }
+});
+
+test("mission time rewards never exceed the duration or fall below zero", () => {
+  assert.equal(clampMissionTime(64, 5, 65), 65);
+  assert.equal(clampMissionTime(1, -3, 65), 0);
+  assert.equal(clampMissionTime(20, 4, 65), 24);
+});
+
+test("commendations distinguish mission completion, incident-free shifts, and campaign finale", () => {
+  assert.deepEqual(getMissionBadges(0, false, 0), []);
+  assert.deepEqual(getMissionBadges(0, true, 1), ["mission-0-complete"]);
+  assert.deepEqual(getMissionBadges(0, true, 0), ["mission-0-complete", "incident-free-0"]);
+  assert.equal(getMissionBadges(8, true, 0).at(-1), "campaign-complete");
+});
+
+test("only a completed ninth mission ends the campaign", () => {
+  assert.equal(getMissionEndState(0, true), "missionComplete");
+  assert.equal(getMissionEndState(MISSION_COUNT - 1, true), "campaignComplete");
+  assert.equal(getMissionEndState(MISSION_COUNT - 1, false), "failed");
+});

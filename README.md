@@ -1,45 +1,61 @@
 # Office Mayhem
 
-A tiny, no-install browser game about surviving a coffee-related office incident. Click the right targets, finish all three shifts, and try not to disappoint the office fern.
+A chaotic office game about catching coffee, rescuing a fern, unjamming a printer, sorting urgent documents, and surviving a frankly unnecessary number of notifications.
 
-## Play
+## Play online
 
-1. Open `index.html` in a modern web browser.
-2. Optionally press **♫ Music: Off** to turn on the original, browser-generated office jazz and sound effects. Audio starts only after you click, to comply with browser autoplay rules.
-3. Press **Start the shift**.
-4. Click targets in the office scene with your mouse (or tap on a touchscreen). The game lasts for three levels; each level has a fresh 30-second timer.
-5. Complete all three levels to become Chief Beverage Officer. If time runs out, choose **Retry the shift** to start over.
+Open the published GitHub Pages site in a modern browser. No account, install, or network connection during play is required.
 
-## Know your targets
+## Run locally
 
-| Target | How to recognize it | What happens when clicked |
+The page uses JavaScript modules, so serve it over HTTP instead of opening `index.html` directly:
+
+1. Install Node.js 20 or newer.
+2. In the project folder, run `npm install`.
+3. Run `npm start` and open <http://127.0.0.1:4173>.
+
+## How to play
+
+1. Choose a mission card from the **Missions** board. Completing a mission unlocks the next one.
+2. Catch steaming hot coffee; avoid iced coffee. Click or tap the fern itself when it needs water.
+3. Complete the mission activity: silence phones, catch yellow report mugs, clear printer parts in order, sort documents by tray color, or tap pests before they reach the fern.
+4. Finish every objective before the shift timer runs out. Early missions have slower targets; later missions become faster.
+5. Finish without incidents to earn a commendation. High scores and personal bests are optional performance goals, not the only progression.
+6. After a shift, use the nearby retry, previous/next mission, or mission-board controls. Your progress, commendations, and best scores are saved in this browser.
+
+## Targets and tasks
+
+| Target or task | How to recognize it | Result |
 | --- | --- | --- |
-| **Hot coffee** | Steaming mug | +1 point and advances the level objective by one. Catch golden hot coffee for **+3 points**; it also counts toward the objective. |
-| **Iced coffee** | Mug marked with a snowflake | Avoid it: clicking costs **2 seconds** and adds an HR incident. |
-| **Expense report** | Paperwork mug marked with `!` | **+2 points** and **1.5 seconds**. The clock cannot go above 30 seconds. |
+| **Hot coffee** | Steaming mug | +1 point and advances the coffee objective. |
+| **Golden coffee** | Bright gold mug with a star | +3 points; it moves faster and advances the coffee objective. |
+| **Iced coffee** | Mug marked with a snowflake | Avoid it; clicking costs 2 seconds and adds an incident. |
+| **Report mug** | Bright yellow mug with a report label and dark `!` | +2 points, 1.5 seconds, and progress on report missions. |
+| **Ringing phone** | Blue phone with a countdown ring | Tap it for +3 points and a second; letting it expire distracts the office and costs time. |
+| **Office fern** | Plant on the desk | Tap it to water it and complete the mission chore. |
+| **Jammed printer** | Three numbered, blinking lights | Tap the printer parts in the displayed order. |
+| **Urgent documents** | Paper above three color-coded trays | Pick up the document and tap the tray with the matching color. |
+| **Fern pests** | Wiggling bugs crawling toward the fern | Tap each pest before it reaches the plant. |
 
-Hot coffee that escapes after about seven seconds adds an HR incident. Missing it does not directly reduce the timer.
+The finite nine-mission campaign introduces new activities gradually. A completed mission unlocks the next; replaying a mission can improve its best score but does not unlock more missions. Legacy six-mission saves are migrated so existing scores and progress are retained.
 
-## Levels and bonus task
+Ambient audio is optional and generated in the browser with Web Audio. Select **Ambient: Off** to start it; select it again to stop. Browsers require a user action before audio can play.
 
-The on-screen progress bar tracks hot coffee caught in the current level:
+## Tests
 
-| Level | Hot coffee goal | What changes |
-| --- | ---: | --- |
-| 1 · Easy | 5 | A slower start and fewer targets at once. |
-| 2 · Medium | 8 | Targets appear faster and move quicker. |
-| 3 · Hard | 12 | The quickest, busiest shift. |
+```sh
+npm install
+npx playwright install chromium
+npm test
+```
 
-Each level has a bonus task: catch **two expense reports**. Completing it awards an additional **4 points and 3 seconds**. Reports also give their usual points and time individually. The clock is capped at 30 seconds.
+`npm test` runs Node game-rule/audio/contrast tests and Playwright browser checks for mission cards, legacy-save migration, direct plant watering, the new activities, bundled music, and mobile portrait/landscape layouts and touch input.
 
-## Tips
+## Project files
 
-- Prioritize steaming mugs; only hot coffee advances the level objective.
-- Watch for the snowflake before clicking—iced coffee costs precious time.
-- Expense reports are a useful side objective when you can catch them safely.
-- Golden hot coffee is worth triple points.
-- Targets move, so aim where they are now, not where they started.
-
-## About
-
-The game is self-contained in `index.html`: it uses hand-drawn canvas graphics and creates its optional music and sound effects with the browser's Web Audio API. It needs no installation, external assets, or network connection.
+- `index.html` — accessible page structure and game entry point.
+- `styles.css` — desktop and responsive mobile layouts.
+- `src/game-rules.js` — deterministic mission generation, scoring, and campaign progression.
+- `src/main.js` — canvas graphics, input, and gameplay.
+- `src/audio.js` — generated ambient music and sound effects.
+- `tests/` — unit and browser regression tests.
