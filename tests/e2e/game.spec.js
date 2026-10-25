@@ -79,6 +79,26 @@ test("the fern requests water before watering counts toward the mission", async 
   await expect(page.locator("#plantRequestStatus")).toContainText("Fern watered");
 });
 
+test("mission starts reroll the locally generated office, plants, and weather", async ({ page }) => {
+  await page.getByRole("button", { name: "Close mission board" }).click();
+  const canvas = page.locator("#game");
+  await expect(canvas).toHaveAttribute("aria-label", /Office: .+; (day|night), (clear|cloudy|rain|snow); [2-4] plants and flowers\./);
+  await page.evaluate(() => {
+    const seeds = [121, 122];
+    crypto.getRandomValues = array => {
+      array[0] = seeds.shift() ?? 123;
+      return array;
+    };
+  });
+  await page.getByRole("button", { name: "Start mission" }).click();
+  const firstScene = await canvas.getAttribute("aria-label");
+  expect(firstScene).toContain("Maple Corner Office; night, snow; 2 plants and flowers.");
+  await page.getByRole("button", { name: "Restart mission" }).click();
+  const secondScene = await canvas.getAttribute("aria-label");
+  expect(secondScene).toContain("Sunroom Annex; day, snow; 3 plants and flowers.");
+  expect(secondScene).not.toBe(firstScene);
+});
+
 test("legacy campaign progress migrates and unlocks the next mission by completion", async ({ page }) => {
   await unlockThrough(page, 6);
   await expect(page.locator(".mission-card:not(:disabled)")).toHaveCount(7);

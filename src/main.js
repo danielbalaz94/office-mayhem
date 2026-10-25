@@ -11,6 +11,7 @@ import {
   chooseTargetKind,
   createEmptyProgress,
   createMission,
+  createOfficeScene,
   getAdjacentMissionIndex,
   getMissionEndState,
   getTargetSpeed,
@@ -145,6 +146,13 @@ function setMessage(text, seconds = 2.3) {
   state.messageClock = seconds;
 }
 
+function updateCanvasDescription() {
+  const scene = state.mission.scene;
+  canvas.setAttribute("aria-label",
+    `Play the office mission: catch hot coffee, avoid iced coffee, and complete the mission activity. ` +
+    `Office: ${scene.office.name}; ${scene.timeOfDay}, ${scene.weather}; ${scene.plants.length} plants and flowers.`);
+}
+
 function formatTaskHint() {
   const details = ["Commendation: zero incidents"];
   if (state.fernRequesting) details.push("The fern is asking for water");
@@ -272,6 +280,7 @@ function selectMission(index, preview = missionPreviews.get(index)) {
   }
   state.selectedIndex = index;
   state.mission = preview;
+  updateCanvasDescription();
   state.mode = "ready";
   state.score = 0;
   state.incidents = 0;
@@ -295,6 +304,9 @@ function selectMission(index, preview = missionPreviews.get(index)) {
 }
 
 function startMission() {
+  const sceneSeed = crypto.getRandomValues(new Uint32Array(1))[0];
+  state.mission = Object.freeze({ ...state.mission, scene: createOfficeScene(sceneSeed) });
+  updateCanvasDescription();
   state.score = 0;
   state.incidents = 0;
   state.timeLeft = state.mission.durationSeconds;
@@ -415,62 +427,186 @@ function spawnPest(now) {
   });
 }
 
-function drawBackground(now) {
-  const sky = ctx.createLinearGradient(0, 0, 0, HEIGHT);
-  sky.addColorStop(0, "#bac9b8");
-  sky.addColorStop(.63, "#e4d6b8");
-  sky.addColorStop(.64, "#b78c60");
-  sky.addColorStop(1, "#92704f");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-  ctx.fillStyle = "#536861";
-  ctx.fillRect(35, 36, 285, 150);
-  ctx.fillStyle = "#a8d2c3";
-  ctx.fillRect(44, 45, 267, 132);
-  ctx.fillStyle = "#83b8aa";
+function drawCloud(x, y, scale, color) {
+  ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.arc(255, 77, 21, 0, Math.PI * 2);
+  ctx.arc(x, y, 11 * scale, Math.PI, 0);
+  ctx.arc(x + 13 * scale, y - 7 * scale, 14 * scale, Math.PI, 0);
+  ctx.arc(x + 27 * scale, y, 10 * scale, Math.PI, 0);
+  ctx.lineTo(x + 27 * scale, y + 7 * scale);
+  ctx.lineTo(x, y + 7 * scale);
+  ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = "#80a58b";
-  ctx.beginPath();
-  ctx.moveTo(44, 163); ctx.lineTo(105, 105); ctx.lineTo(159, 155);
-  ctx.lineTo(210, 111); ctx.lineTo(311, 170); ctx.lineTo(311, 177); ctx.lineTo(44, 177);
-  ctx.fill();
-  ctx.fillStyle = "#536861";
-  ctx.fillRect(174, 45, 7, 132);
-  ctx.fillRect(44, 107, 267, 7);
+}
 
-  ctx.fillStyle = "#7d6248";
-  ctx.fillRect(748, 93, 157, 241);
-  ctx.fillStyle = "#a78963";
-  ctx.fillRect(758, 104, 137, 104);
-  ctx.fillRect(758, 219, 137, 104);
-  ctx.fillStyle = "#d9cba8";
-  ctx.fillRect(814, 150, 26, 5);
-  ctx.fillRect(814, 265, 26, 5);
-  ctx.fillStyle = "#705741";
-  ctx.fillRect(0, 394, WIDTH, 23);
-  ctx.fillStyle = "#664c38";
-  ctx.fillRect(0, 417, WIDTH, 123);
+function drawSky(scene, now, [x, y, width, height]) {
+  const night = scene.timeOfDay === "night";
+  const gradient = ctx.createLinearGradient(0, y, 0, y + height);
+  gradient.addColorStop(0, night ? "#17243d" : scene.office.windowColor);
+  gradient.addColorStop(1, night ? "#59677a" : "#d8e6bc");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x, y, width, height);
 
-  const fernHappy = now < state.fernWetUntil;
-  ctx.fillStyle = "#b78c60";
-  ctx.fillRect(672, 345, 38, 48);
-  ctx.fillStyle = fernHappy ? "#83b85f" : "#658363";
-  for (let i = 0; i < 5; i++) {
-    ctx.save();
-    ctx.translate(691, 351);
-    ctx.rotate((i - 2) * .38 + (fernHappy ? Math.sin(now / 100) * .08 : 0));
+  if (night) {
+    ctx.fillStyle = "#f8edc3";
     ctx.beginPath();
-    ctx.ellipse(0, -20, 8, 21, 0, 0, Math.PI * 2);
+    ctx.arc(x + width * .77, y + height * .28, 15, 0, Math.PI * 2);
     ctx.fill();
+    ctx.fillStyle = "#34435e";
+    ctx.beginPath();
+    ctx.arc(x + width * .83, y + height * .23, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#f8f0d4";
+    for (const detail of scene.skyDetails) {
+      ctx.beginPath();
+      ctx.arc(x + detail.x * width, y + detail.y * height, detail.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (scene.weather === "clear" || scene.weather === "cloudy") {
+    ctx.fillStyle = "#ffe39a";
+    ctx.beginPath();
+    ctx.arc(x + width * .78, y + height * .29, 18, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (scene.weather !== "clear") {
+    const cloudColor = night ? "#9aa9bd" : "#f0f1e6";
+    drawCloud(x + width * .18, y + height * .37, .9, cloudColor);
+    drawCloud(x + width * .56, y + height * .54, .72, cloudColor);
+  }
+
+  ctx.fillStyle = scene.office.hills[0];
+  ctx.beginPath();
+  ctx.moveTo(x, y + height * .76);
+  ctx.lineTo(x + width * .22, y + height * .45);
+  ctx.lineTo(x + width * .42, y + height * .78);
+  ctx.lineTo(x + width * .62, y + height * .5);
+  ctx.lineTo(x + width, y + height * .83);
+  ctx.lineTo(x + width, y + height);
+  ctx.lineTo(x, y + height);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = scene.office.hills[1];
+  ctx.fillRect(x, y + height * .84, width, height * .16);
+
+  if (scene.weather === "rain" || scene.weather === "snow") {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, width, height);
+    ctx.clip();
+    for (let index = 0; index < scene.skyDetails.length; index++) {
+      const detail = scene.skyDetails[index];
+      const particleX = x + detail.x * width;
+      const particleY = y + ((detail.y * height + now * (scene.weather === "rain" ? .18 : .035)) % height);
+      if (scene.weather === "rain") {
+        ctx.strokeStyle = "#d7efffbb";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(particleX, particleY);
+        ctx.lineTo(particleX - 4, particleY + 11);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = "#fffef2";
+        ctx.beginPath();
+        ctx.arc(particleX, particleY, detail.size + 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
     ctx.restore();
   }
-  if (state.fernRequesting) {
+}
+
+function drawPlant(plant, now, happy = false, requesting = false) {
+  const { x, y, kind, pot } = plant;
+  const soilTop = y - 19;
+  ctx.fillStyle = pot;
+  ctx.beginPath();
+  ctx.moveTo(x - 18, soilTop);
+  ctx.lineTo(x + 18, soilTop);
+  ctx.lineTo(x + 14, y + 12);
+  ctx.lineTo(x - 14, y + 12);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#594333";
+  ctx.fillRect(x - 17, soilTop - 3, 34, 5);
+
+  const leafColor = happy ? "#a7d977" : "#698d5a";
+  ctx.strokeStyle = "#47744f";
+  ctx.lineWidth = 3;
+  if (kind === "fern") {
+    ctx.fillStyle = leafColor;
+    for (let index = 0; index < 5; index++) {
+      ctx.save();
+      ctx.translate(x, soilTop);
+      ctx.rotate((index - 2) * .38 + (happy ? Math.sin(now / 100) * .08 : 0));
+      ctx.beginPath();
+      ctx.ellipse(0, -20, 8, 21, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  } else if (kind === "cactus") {
+    ctx.fillStyle = "#4f9b68";
+    ctx.beginPath();
+    ctx.roundRect(x - 7, y - 55, 14, 37, 7);
+    ctx.roundRect(x - 17, y - 43, 9, 20, 5);
+    ctx.roundRect(x + 8, y - 48, 9, 21, 5);
+    ctx.fill();
+    ctx.strokeStyle = "#c5e5a0";
+    for (let index = -1; index <= 1; index++) {
+      ctx.beginPath();
+      ctx.moveTo(x + index * 5, y - 48);
+      ctx.lineTo(x + index * 5 + 2, y - 44);
+      ctx.stroke();
+    }
+  } else if (kind === "succulent") {
+    ctx.fillStyle = "#83a86c";
+    for (let index = 0; index < 8; index++) {
+      ctx.save();
+      ctx.translate(x, soilTop);
+      ctx.rotate(index * Math.PI / 4);
+      ctx.beginPath();
+      ctx.ellipse(0, -16, 7, 17, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  } else {
+    const flowerColor = kind === "tulip" ? "#ed7a83" :
+      kind === "sunflower" ? "#ffd166" : "#f4e8d2";
+    ctx.strokeStyle = "#5b8a54";
+    ctx.beginPath();
+    ctx.moveTo(x, soilTop);
+    ctx.lineTo(x, y - 45);
+    ctx.stroke();
+    ctx.fillStyle = "#5b9b61";
+    ctx.beginPath();
+    ctx.ellipse(x - 6, y - 29, 8, 4, -.45, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = flowerColor;
+    if (kind === "tulip") {
+      ctx.beginPath();
+      ctx.ellipse(x, y - 49, 9, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      for (let index = 0; index < 8; index++) {
+        ctx.save();
+        ctx.translate(x, y - 49);
+        ctx.rotate(index * Math.PI / 4);
+        ctx.beginPath();
+        ctx.ellipse(0, -8, 4, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+    ctx.fillStyle = kind === "sunflower" ? "#744b2d" : "#e6b94f";
+    ctx.beginPath();
+    ctx.arc(x, y - 49, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (requesting) {
     ctx.fillStyle = "#203229";
     ctx.beginPath();
-    ctx.roundRect(649, 304, 84, 24, 8);
+    ctx.roundRect(x - 42, y - 64, 84, 24, 8);
     ctx.fill();
     ctx.strokeStyle = "#ffd18a";
     ctx.lineWidth = 2;
@@ -478,18 +614,92 @@ function drawBackground(now) {
     ctx.fillStyle = "#ffd18a";
     ctx.font = "bold 11px Trebuchet MS, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("WATER ME!", 691, 320);
+    ctx.fillText("WATER ME!", x, y - 48);
     ctx.textAlign = "start";
+  }
+}
+
+function drawBackground(now) {
+  const { office, plants } = state.mission.scene;
+  const wall = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+  wall.addColorStop(0, office.wall[0]);
+  wall.addColorStop(.63, office.wall[1]);
+  wall.addColorStop(.64, office.floor);
+  wall.addColorStop(1, office.deskFront);
+  ctx.fillStyle = wall;
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  const [windowX, windowY, windowWidth, windowHeight] = office.windowRect;
+  ctx.fillStyle = office.windowFrame;
+  ctx.fillRect(windowX, windowY, windowWidth, windowHeight);
+  const view = [windowX + 9, windowY + 9, windowWidth - 18, windowHeight - 18];
+  drawSky(state.mission.scene, now, view);
+  ctx.fillStyle = office.windowFrame;
+  for (let index = 1; index <= office.windowMullions; index++) {
+    const mullionX = windowX + windowWidth * index / (office.windowMullions + 1) - 3;
+    ctx.fillRect(mullionX, windowY + 8, 6, windowHeight - 16);
+  }
+  ctx.fillRect(windowX + 8, windowY + windowHeight * .55, windowWidth - 16, 6);
+
+  if (office.name === "Bluebird Studio") {
+    ctx.fillStyle = "#e7dfcd";
+    ctx.beginPath();
+    ctx.arc(492, 92, 29, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#536275";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.fillRect(490, 72, 4, 21);
+    ctx.fillRect(491, 91, 16, 4);
+  } else if (office.name === "Sunroom Annex") {
+    ctx.fillStyle = "#597b5d";
+    ctx.fillRect(414, 72, 112, 6);
+    ctx.fillRect(424, 78, 6, 39);
+    ctx.fillRect(504, 78, 6, 29);
+  } else if (office.name === "Nightshift Nook") {
+    ctx.fillStyle = "#30394e";
+    ctx.fillRect(410, 63, 132, 72);
+    ctx.fillStyle = "#b8c7d2";
+    ctx.fillRect(422, 76, 26, 17);
+    ctx.fillRect(460, 76, 26, 17);
+    ctx.fillRect(498, 76, 31, 17);
+    ctx.fillRect(422, 104, 106, 18);
+  } else {
+    ctx.fillStyle = "#657b66";
+    ctx.fillRect(421, 65, 104, 66);
+    ctx.fillStyle = "#f0d9a8";
+    ctx.fillRect(428, 72, 90, 52);
+    ctx.fillStyle = "#d18b69";
+    ctx.beginPath();
+    ctx.arc(473, 98, 17, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const [doorX, doorY, doorWidth, doorHeight] = office.doorRect;
+  ctx.fillStyle = office.door[0];
+  ctx.fillRect(doorX, doorY, doorWidth, doorHeight);
+  ctx.fillStyle = office.door[1];
+  ctx.fillRect(doorX + 10, doorY + 11, doorWidth - 20, doorHeight * .43);
+  ctx.fillRect(doorX + 10, doorY + doorHeight * .52, doorWidth - 20, doorHeight * .43);
+  ctx.fillStyle = office.trim;
+  ctx.fillRect(doorX + doorWidth * .42, doorY + 57, 26, 5);
+  ctx.fillRect(doorX + doorWidth * .42, doorY + doorHeight * .71, 26, 5);
+  ctx.fillStyle = office.desk;
+  ctx.fillRect(0, 394, WIDTH, 23);
+  ctx.fillStyle = office.deskFront;
+  ctx.fillRect(0, 417, WIDTH, 123);
+
+  const fernHappy = now < state.fernWetUntil;
+  for (const plant of plants) {
+    drawPlant(plant, now, fernHappy && plant.kind === "fern", state.fernRequesting && plant.kind === "fern");
   }
   drawActivityStations(now);
   ctx.fillStyle = "#534536";
   ctx.font = "bold 15px Trebuchet MS, sans-serif";
-  ctx.fillText("Q3 GOALS", 62, 212);
+  ctx.fillText(office.name.toUpperCase(), 62, 212);
   ctx.font = "12px Trebuchet MS, sans-serif";
-  ctx.fillText("1. Catch mugs", 62, 234);
-  ctx.fillText("2. Silence phone", 62, 253);
-  ctx.fillText("3. Water fern", 62, 272);
-  ctx.fillText("it is watching", 76, 289);
+  ctx.fillText("The office has opinions.", 62, 234);
+  ctx.fillText("Please address them.", 62, 253);
 
   ctx.fillStyle = "#e9e0cc";
   ctx.save();
@@ -504,7 +714,8 @@ function drawBackground(now) {
   ctx.restore();
   ctx.fillStyle = "#f7f4e9dd";
   ctx.font = "bold 13px Trebuchet MS, sans-serif";
-  ctx.fillText(state.mode === "running" ? "BREAK ROOM INCIDENT IN PROGRESS" : "BREAK ROOM · 9:01 AM", 351, 34);
+  const scene = state.mission.scene;
+  ctx.fillText(`${scene.office.name.toUpperCase()} · ${scene.timeOfDay.toUpperCase()} · ${scene.weather.toUpperCase()}`, 351, 34);
 }
 
 function drawActivityStations(now) {
@@ -1063,6 +1274,7 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
+updateCanvasDescription();
 updateMissionPicker();
 updateHud();
 nodes.missionBrowser.showModal();

@@ -9,6 +9,7 @@ import {
   chooseTargetKind,
   createEmptyProgress,
   createMission,
+  createOfficeScene,
   getAdjacentMissionIndex,
   getMissionBadges,
   getMissionEndState,
@@ -26,6 +27,27 @@ test("procedural missions are deterministic for the same result and seed", () =>
     JSON.stringify(createMission(2, 40, seed + 1))));
   assert.ok(variants.size > 1);
   assert.ok(new Set([...variants].map(value => JSON.parse(value).durationSeconds)).size > 1);
+});
+
+test("procedural office scenes vary locally with distinct layouts, weather, and plants", () => {
+  const first = createOfficeScene(121);
+  assert.deepEqual(createOfficeScene(121), first);
+  assert.notDeepEqual(createOfficeScene(122), first);
+  const scenes = Array.from({ length: 80 }, (_, seed) => createOfficeScene(seed + 1));
+
+  assert.ok(new Set(scenes.map(scene => scene.office.name)).size > 1);
+  assert.ok(new Set(scenes.map(scene => scene.timeOfDay)).has("day"));
+  assert.ok(new Set(scenes.map(scene => scene.timeOfDay)).has("night"));
+  assert.ok(new Set(scenes.map(scene => scene.weather)).has("rain"));
+  assert.ok(new Set(scenes.map(scene => scene.weather)).has("snow"));
+  for (const scene of scenes) {
+    assert.ok(["clear", "cloudy", "rain", "snow"].includes(scene.weather));
+    assert.ok(scene.plants.length >= 2 && scene.plants.length <= 4);
+    assert.ok(scene.plants.some(plant => plant.kind === "fern"));
+    assert.ok(scene.plants.some(plant => ["daisy", "tulip", "sunflower"].includes(plant.kind)));
+    assert.equal(new Set(scene.plants.map(plant => plant.x)).size, scene.plants.length);
+    assert.ok(scene.plants.every(plant => plant.y === 366 && typeof plant.pot === "string"));
+  }
 });
 
 test("nine fixed missions progressively introduce distinct activity types", () => {
