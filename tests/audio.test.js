@@ -102,6 +102,24 @@ test("plant request and mission completion cues use generated tones", async () =
   assert.ok(context.oscillators.every(oscillator => oscillator.destination.destination === audio.master));
 });
 
+test("hot and iced mugs have distinct generated sound cues", async () => {
+  const context = new FakeContext();
+  const audio = createAudio(context);
+  await audio.prepare();
+  audio.playHotCoffee();
+  const hotFrequencies = context.oscillators.map(oscillator => oscillator.frequency.value);
+  const hotType = context.oscillators[0].type;
+
+  context.oscillators.length = 0;
+  audio.playColdCoffee();
+  const coldFrequencies = context.oscillators.map(oscillator => oscillator.frequency.value);
+  const coldType = context.oscillators[0].type;
+
+  assert.deepEqual(hotFrequencies, [392, 493.88, 587.33]);
+  assert.deepEqual(coldFrequencies, [1174.66, 880, 1174.66]);
+  assert.notEqual(hotType, coldType);
+});
+
 test("audio controls report when the browser has no Web Audio support", async () => {
   const audio = new GameAudio({});
   assert.equal(await audio.toggleMusic(), false);

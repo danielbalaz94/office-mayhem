@@ -90,6 +90,7 @@ const state = {
   task: { coffee: 0, water: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 },
   spawnClock: 0,
   nonHotSpawnStreak: 0,
+  coldlessSpawnStreak: 0,
   waterRequestClock: 0,
   fernRequesting: false,
   lastFrame: 0,
@@ -272,6 +273,21 @@ function selectMission(index, preview = missionPreviews.get(index)) {
   state.selectedIndex = index;
   state.mission = preview;
   state.mode = "ready";
+  state.score = 0;
+  state.incidents = 0;
+  state.timeLeft = preview.durationSeconds;
+  state.task = { coffee: 0, water: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 };
+  state.spawnClock = 0;
+  state.nonHotSpawnStreak = 0;
+  state.coldlessSpawnStreak = 0;
+  state.waterRequestClock = 0;
+  state.fernRequesting = false;
+  state.fernWetUntil = 0;
+  state.sortingItemSelected = false;
+  state.pestClock = 0;
+  targets.length = 0;
+  particles.length = 0;
+  nodes.plantRequestStatus.textContent = "The fern is resting.";
   nodes.start.textContent = "Start mission";
   updateMissionDescription();
   updateMissionCards();
@@ -285,6 +301,7 @@ function startMission() {
   state.task = { coffee: 0, water: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 };
   state.spawnClock = 0;
   state.nonHotSpawnStreak = 0;
+  state.coldlessSpawnStreak = 0;
   state.waterRequestClock = 5;
   state.fernRequesting = false;
   state.pestClock = 0;
@@ -299,7 +316,7 @@ function startMission() {
     setMessage("This browser could not start game audio.", 3);
   });
   nodes.start.textContent = "Restart mission";
-  setMessage("Go! The phones are buzzing and the fern has a calendar invite.", 3);
+  setMessage("Goal: finish every objective before time runs out. Catch steaming coffee; avoid iced mugs.", 5);
   updateHud();
   canvas.focus({ preventScroll: true });
 }
@@ -348,8 +365,17 @@ function spawnTarget(now) {
   const taskPending = mission.taskKind === "reports"
     ? task.reports < mission.taskGoal
     : mission.taskKind === "phone" && task.phone < mission.taskGoal;
-  const kind = chooseTargetKind(Math.random(), mission.taskKind, taskPending, state.nonHotSpawnStreak);
+  const activeReportCount = targets.filter(target => target.kind === "report").length;
+  const kind = chooseTargetKind(
+    Math.random(),
+    mission.taskKind,
+    taskPending,
+    state.nonHotSpawnStreak,
+    activeReportCount,
+    state.coldlessSpawnStreak
+  );
   state.nonHotSpawnStreak = kind === "hot" ? 0 : state.nonHotSpawnStreak + 1;
+  state.coldlessSpawnStreak = kind === "cold" ? 0 : state.coldlessSpawnStreak + 1;
   const golden = kind === "hot" && Math.random() < .13;
   const radius = kind === "phone" ? 24 : kind === "report" ? 27 : golden ? 28 : randomBetween(22, 30);
   const angle = randomBetween(0, Math.PI * 2);
@@ -868,7 +894,7 @@ function hitTarget(target) {
   if (result.progress) state.task[result.progress]++;
   if (target.kind === "cold") {
     state.shake = 7;
-    audio.play(145, .2, "sine", .04);
+    audio.playColdCoffee();
     setMessage("ICED COFFEE! Two seconds lost to the workplace hazard report.", 2.5);
   } else if (target.kind === "phone") {
     audio.play(659.25, .17, "sine", .03);
@@ -880,7 +906,7 @@ function hitTarget(target) {
     audio.play(392, .18, "triangle", .04);
     setMessage("Pest tapped! The fern has requested a tiny security detail.", 2.2);
   } else {
-    audio.play(target.golden ? 1046.5 : 740, .16, "sine", .025);
+    audio.playHotCoffee(target.golden);
     for (let index = 0; index < 8; index++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = randomBetween(35, 120);

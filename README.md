@@ -39,7 +39,7 @@ The page uses JavaScript modules, so serve it over HTTP instead of opening `inde
 
 The finite nine-mission campaign introduces new activities gradually. A completed mission unlocks the next; replaying a mission can improve its best score but does not unlock more missions. Legacy six-mission saves are migrated so existing scores and progress are retained.
 
-Music and sound effects are generated locally in the browser with Web Audio; no audio files are downloaded. The original tune now plays more slowly in a warmer, lower register with soft chord backing. Select **Music: Off** to start it, use the volume slider for both music and effects, or select **Music: On** to mute the tune while keeping effects available. Mission completion and plant requests have generated sound cues. Browsers require a user action before audio can play.
+Music and sound effects are generated locally in the browser with Web Audio; no audio files are downloaded. The original tune now plays more slowly in a warmer, lower register with soft chord backing. Hot and iced mugs have distinct generated cues, as do mission completion and plant requests. Select **Music: Off** to start the tune, use the volume slider for both music and effects, or select **Music: On** to mute the tune while keeping effects available. Browsers require a user action before audio can play.
 
 ## Tests
 

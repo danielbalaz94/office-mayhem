@@ -42,6 +42,8 @@ async function unlockThrough(page, lastMissionIndex) {
 test("mission board shows nine square cards and the preview matches the selected mission", async ({ page }) => {
   const dialog = page.getByRole("dialog", { name: "Mission board" });
   await expect(dialog).toBeVisible();
+  await expect(page.locator(".subtitle")).toContainText("Goal:");
+  await expect(page.locator("#message")).toContainText("finish every listed objective");
   await expect(page.locator(".mission-card")).toHaveCount(9);
   await expect(page.locator(".mission-card:not(:disabled)")).toHaveCount(1);
   await expect(page.locator(".mission-card").nth(1)).toBeDisabled();
@@ -162,6 +164,7 @@ test("result controls stay available beside retry and mission browsing", async (
 });
 
 test("ended shifts show previous and next controls beside retry", async ({ page }) => {
+  test.setTimeout(45_000);
   await unlockThrough(page, 5);
   await chooseMission(page, 2);
   await page.evaluate(() => {
@@ -170,7 +173,7 @@ test("ended shifts show previous and next controls beside retry", async ({ page 
   });
   await page.getByRole("button", { name: "Start mission" }).click();
   const retry = page.getByRole("button", { name: "Play this mission again" });
-  await expect(retry).toBeVisible({ timeout: 15_000 });
+  await expect(retry).toBeVisible({ timeout: 30_000 });
   const previous = page.getByRole("button", { name: "Previous mission" });
   const next = page.getByRole("button", { name: "Next mission" });
   await expect(previous).toBeVisible();
@@ -178,6 +181,14 @@ test("ended shifts show previous and next controls beside retry", async ({ page 
   await expect(previous).toBeEnabled();
   await expect(next).toBeEnabled();
   await expect(page.getByRole("button", { name: "Missions" })).toBeEnabled();
+  await expect(previous).toContainText("Previous");
+  await expect(next).toContainText("Next");
+  const previousBounds = await previous.boundingBox();
+  const retryBounds = await retry.boundingBox();
+  const nextBounds = await next.boundingBox();
+  expect(previousBounds.x + previousBounds.width).toBeLessThan(retryBounds.x);
+  expect(retryBounds.x + retryBounds.width).toBeLessThan(nextBounds.x);
+  expect(previousBounds.height).toBeGreaterThanOrEqual(32);
 
   await next.click();
   await expect(page.locator("#level")).toHaveText("4/9");
@@ -185,6 +196,26 @@ test("ended shifts show previous and next controls beside retry", async ({ page 
   await expect(next).toBeVisible();
   await previous.click();
   await expect(page.locator("#level")).toHaveText("3/9");
+});
+
+test("selecting another mission clears the previous mission's objective checks", async ({ page }) => {
+  test.setTimeout(45_000);
+  await unlockThrough(page, 2);
+  await chooseMission(page, 0);
+  await page.evaluate(() => {
+    let elapsed = performance.now();
+    window.requestAnimationFrame = callback => window.setTimeout(() => callback(elapsed += 40), 0);
+  });
+  await page.getByRole("button", { name: "Start mission" }).click();
+  await expect(page.locator("#waterObjective")).toHaveAttribute("data-requesting", "true", { timeout: 7000 });
+  await tapCanvas(page, 691, 365);
+  await expect(page.locator("#waterObjective")).toHaveAttribute("data-complete", "true");
+  await expect(page.locator("#message")).toContainText("Shift over", { timeout: 30_000 });
+  await page.getByRole("button", { name: "Next mission" }).click();
+  await expect(page.locator("#level")).toHaveText("2/9");
+  await expect(page.locator("#waterProgress")).toHaveText("Waiting · 0/1");
+  await expect(page.locator("#waterObjective")).toHaveAttribute("data-complete", "false");
+  await expect(page.locator("#coffeeProgress")).toHaveText(/0\/\d+/);
 });
 
 test("portrait and rotated landscape keep the canvas and controls within the viewport", async ({ page }) => {

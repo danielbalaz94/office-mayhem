@@ -12,7 +12,7 @@
     <header class="masthead">
       <p class="eyebrow">A very serious workplace simulation</p>
       <h1>OFFICE <span>MAYHEM</span></h1>
-      <p class="subtitle">Catch hot coffee. Water the fern when it asks. Silence the group chat.</p>
+      <p class="subtitle">Goal: finish every checklist objective before time runs out. Catch steaming coffee; avoid iced mugs.</p>
     </header>
     <section class="game-card" aria-label="Office Mayhem game">
       <div class="scoreboard" role="group" aria-label="Live game statistics">
@@ -60,23 +60,27 @@
         </div>
       </div>
       <div class="controls">
-        <p class="message" id="message" role="status">Select a mission to begin. The fern has already sent a calendar invite.</p>
+        <p class="message" id="message" role="status">Choose a mission, then finish every listed objective before the shift ends. Catch steaming coffee; avoid iced mugs.</p>
         <div class="control-buttons">
-          <button id="previousMission" class="action-button nav-button" type="button" aria-label="Previous mission" disabled>←</button>
-          <button id="nextMission" class="action-button nav-button" type="button" aria-label="Next mission" disabled>→</button>
-          <label class="volume-control" for="volume">
-            <span>Volume</span>
-            <input id="volume" type="range" min="0" max="100" value="65" aria-label="Sound volume">
-            <output id="volumeValue" for="volume">65%</output>
-          </label>
-          <button id="music" class="music-button" type="button" aria-pressed="false">♫ Music: Off</button>
-          <button id="start" class="primary-button" type="button">Start mission</button>
+          <div class="mission-actions" role="group" aria-label="Mission controls">
+            <button id="previousMission" class="action-button nav-button" type="button" aria-label="Previous mission" disabled>← Previous</button>
+            <button id="start" class="primary-button" type="button">Start mission</button>
+            <button id="nextMission" class="action-button nav-button" type="button" aria-label="Next mission" disabled>Next →</button>
+          </div>
+          <div class="audio-controls" role="group" aria-label="Audio controls">
+            <label class="volume-control" for="volume">
+              <span>Volume</span>
+              <input id="volume" type="range" min="0" max="100" value="65" aria-label="Sound volume">
+              <output id="volumeValue" for="volume">65%</output>
+            </label>
+            <button id="music" class="music-button" type="button" aria-pressed="false">♫ Music: Off</button>
+          </div>
         </div>
       </div>
     </section>
     <p class="howto">
-      <span><strong>Steaming coffee</strong> = catch</span>
-      <span><strong>Iced coffee</strong> = avoid (−2 sec)</span>
+      <span><strong>Steaming coffee</strong> = catch for progress</span>
+      <span><strong>Iced coffee</strong> = avoid (costs time + an incident)</span>
       <span class="report-key"><strong>Yellow report mug</strong> = bonus</span>
       <span class="phone-key"><strong>Ringing phone</strong> = silence it</span>
       <span><strong>Fern</strong> = tap when it asks for water</span>

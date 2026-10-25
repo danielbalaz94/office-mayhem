@@ -224,8 +224,10 @@ canvas {
   padding: 0 16px 14px;
 }
 .message { min-height: 1.4em; margin: 0; color: #dbe5da; font-size: .9rem; }
-.control-buttons { display: flex; align-items: center; justify-content: center; gap: 9px; }
-.control-buttons .action-button { flex: 0 0 auto; }
+.control-buttons { display: flex; flex: 1 1 auto; align-items: center; justify-content: space-between; gap: 14px; }
+.mission-actions, .audio-controls { display: flex; align-items: center; gap: 9px; }
+.mission-actions { justify-content: center; }
+.audio-controls { justify-content: flex-end; }
 .volume-control {
   display: inline-flex;
   align-items: center;
@@ -236,7 +238,7 @@ canvas {
 }
 .volume-control input { width: 82px; accent-color: var(--mint); }
 .volume-control output { min-width: 2.7em; color: var(--ink); font-variant-numeric: tabular-nums; }
-.nav-button { min-width: 42px; font-size: 1.2rem; }
+.nav-button { min-width: 112px; padding: 0 14px; font-size: .82rem; }
 .primary-button, .music-button {
   padding: 0 17px;
   color: #172127;
@@ -354,14 +356,15 @@ button:disabled { cursor: not-allowed; opacity: .55; filter: grayscale(.4); }
   .stage-note { right: 11px; bottom: 12px; font-size: .58rem; padding: 4px 7px; }
   .controls { align-items: stretch; flex-direction: column; padding: 0 10px 12px; }
   .message { text-align: center; font-size: .82rem; }
-  .control-buttons { width: 100%; flex-wrap: wrap; }
-  .primary-button { flex: 1; }
-  .control-buttons .action-button { width: auto; flex: 0 0 auto; }
-  .volume-control { order: 2; flex: 1 0 100%; justify-content: center; min-height: 34px; }
-  .volume-control input { width: min(48vw, 150px); }
-  .music-button { order: 3; flex: 0 0 auto; padding: 0 12px; }
-  .primary-button { order: 4; }
-  .nav-button { min-width: 38px; padding: 0 8px; }
+  .control-buttons { width: 100%; flex-direction: column; gap: 8px; }
+  .mission-actions, .audio-controls { width: 100%; justify-content: center; }
+  .mission-actions > button { flex: 1 1 0; }
+  .mission-actions .primary-button { flex: 1.2 1 0; }
+  .audio-controls { gap: 8px; }
+  .volume-control { flex: 1 1 auto; justify-content: center; min-height: 34px; }
+  .volume-control input { width: min(34vw, 125px); }
+  .music-button { flex: 0 0 auto; padding: 0 12px; }
+  .nav-button { min-width: 0; padding: 0 8px; font-size: .72rem; }
   .howto { gap: 5px 11px; font-size: .7rem; }
   .mission-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .mission-card { gap: 6px; padding: 8px; }
@@ -404,7 +407,10 @@ button:disabled { cursor: not-allowed; opacity: .55; filter: grayscale(.4); }
   .stage-note { right: 10px; bottom: 8px; padding: 3px 7px; font-size: .58rem; }
   .controls { padding: 0 9px 7px; gap: 8px; }
   .message { font-size: .75rem; }
-  .control-buttons { gap: 7px; }
+  .control-buttons { gap: 6px; }
+  .mission-actions, .audio-controls { gap: 5px; }
+  .nav-button { min-width: 84px; padding: 0 7px; font-size: .62rem; }
+  .mission-actions .primary-button { padding: 0 8px; font-size: .65rem; }
   .volume-control { font-size: .62rem; }
   .volume-control input { width: 64px; }
   .mission-browser { max-height: 92dvh; padding: 12px; border-radius: 12px; }

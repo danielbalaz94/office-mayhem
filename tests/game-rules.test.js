@@ -49,6 +49,7 @@ test("later missions are measurably faster and more demanding than early mission
   for (const kind of ["hot", "phone", "report"]) {
     assert.ok(getTargetSpeed(100, hard, kind) > getTargetSpeed(100, easy, kind));
   }
+  assert.ok(getTargetSpeed(100, easy, "cold") > getTargetSpeed(100, easy, "hot"));
   assert.ok(getTargetSpeed(100, easy, "hot", true) > getTargetSpeed(100, easy, "hot"));
   assert.throws(() => getTargetSpeed(100, easy, "bug"), RangeError);
 });
@@ -179,6 +180,21 @@ test("hot coffee is guaranteed after at most two non-hot spawn selections", () =
   assert.equal(chooseTargetKind(0, "phone", true, 2), "hot");
   assert.throws(() => chooseTargetKind(1, "phone", true), RangeError);
   assert.throws(() => chooseTargetKind(.5, "phone", true, -1), RangeError);
+});
+
+test("iced mugs appear regularly and report mugs never spawn while one is active", () => {
+  const counts = { cold: 0, report: 0, phone: 0, hot: 0 };
+  for (let step = 0; step < 1000; step++) {
+    const kind = chooseTargetKind(step / 1000, null, false);
+    counts[kind]++;
+  }
+  assert.ok(counts.cold >= 300);
+  assert.ok(counts.report >= 100);
+  assert.equal(chooseTargetKind(.3, "reports", true, 0, 1), "cold");
+  assert.equal(chooseTargetKind(.1, "reports", true, 0, 0), "report");
+  assert.equal(chooseTargetKind(.8, null, false, 0, 0, 3), "cold");
+  assert.equal(chooseTargetKind(.8, null, false, 2, 3), "hot");
+  assert.throws(() => chooseTargetKind(.5, "phone", true, 0, -1), RangeError);
 });
 
 test("commendations distinguish mission completion, incident-free shifts, and campaign finale", () => {

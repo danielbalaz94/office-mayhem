@@ -183,30 +183,43 @@ export function getTargetSpeed(baseSpeed, mission, kind, golden = false) {
     throw new RangeError(`Unknown target kind: ${kind}`);
   }
   const bonus = golden || kind === "report" || kind === "phone";
-  return baseSpeed * mission.speedMultiplier * (bonus ? mission.bonusSpeedMultiplier : 1);
+  const hazardMultiplier = kind === "cold" ? 1.28 : 1;
+  return baseSpeed * mission.speedMultiplier * (bonus ? mission.bonusSpeedMultiplier : 1) * hazardMultiplier;
 }
 
-export function chooseTargetKind(roll, taskKind, taskPending, nonHotStreak = 0) {
+export function chooseTargetKind(
+  roll,
+  taskKind,
+  taskPending,
+  nonHotStreak = 0,
+  activeReportCount = 0,
+  coldlessStreak = 0
+) {
   if (!Number.isFinite(roll) || roll < 0 || roll >= 1) {
     throw new RangeError("Target roll must be between 0 (inclusive) and 1 (exclusive).");
   }
   if (!Number.isInteger(nonHotStreak) || nonHotStreak < 0) {
     throw new RangeError("Non-hot target streak must be a non-negative integer.");
   }
+  if (!Number.isInteger(activeReportCount) || activeReportCount < 0 ||
+      !Number.isInteger(coldlessStreak) || coldlessStreak < 0) {
+    throw new RangeError("Active report count and coldless streak must be non-negative integers.");
+  }
   if (nonHotStreak >= 2) return "hot";
+  if (coldlessStreak >= 3) return "cold";
 
   const missionTarget = taskPending && taskKind === "phone"
     ? "phone"
-    : taskPending && taskKind === "reports"
+    : taskPending && taskKind === "reports" && activeReportCount === 0
       ? "report"
       : null;
-  const missionTargetChance = missionTarget ? .28 : 0;
+  const missionTargetChance = missionTarget ? .24 : 0;
   if (missionTarget && roll < missionTargetChance) return missionTarget;
 
   const regularRoll = (roll - missionTargetChance) / (1 - missionTargetChance);
-  if (regularRoll < .15) return "cold";
-  if (regularRoll < .28) return "report";
-  if (regularRoll < .41) return "phone";
+  if (regularRoll < .32) return "cold";
+  if (regularRoll < .44) return activeReportCount === 0 ? "report" : "cold";
+  if (regularRoll < .58) return "phone";
   return "hot";
 }
 

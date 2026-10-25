@@ -78,15 +78,24 @@ export class GameAudio {
     this.playSequence([784, 1046.5], .13, .18, .045);
   }
 
+  playHotCoffee(golden = false) {
+    const notes = golden ? [587.33, 783.99, 987.77] : [392, 493.88, 587.33];
+    this.playSequence(notes, .1, .22, golden ? .035 : .03, "sine");
+  }
+
+  playColdCoffee() {
+    this.playSequence([1174.66, 880, 1174.66], .065, .11, .035, "triangle");
+  }
+
   playMissionComplete() {
     this.playSequence([523.25, 659.25, 783.99, 1046.5], .12, .24, .05);
   }
 
-  playSequence(notes, spacing, duration, volume) {
+  playSequence(notes, spacing, duration, volume, type = "triangle") {
     if (!this.context || this.context.state !== "running") return;
     const startAt = this.context.currentTime;
     notes.forEach((frequency, index) => {
-      this.play(frequency, duration, "triangle", volume, startAt + index * spacing);
+      this.play(frequency, duration, type, volume, startAt + index * spacing);
     });
   }
 
