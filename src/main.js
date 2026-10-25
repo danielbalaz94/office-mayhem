@@ -1,15 +1,18 @@
-import { AmbientAudio } from "./audio.js";
+import { GameAudio } from "./audio.js";
 import { REPORT_PALETTE } from "./palette.js";
 import {
   MISSION_COUNT,
   PROGRESS_STORAGE_KEY,
   LEGACY_PROGRESS_STORAGE_KEY,
   TASK_LABELS,
+  applyPlantRequestExpiry,
   applyTargetExpiry,
   applyTargetHit,
   clampMissionTime,
+  chooseTargetKind,
   createEmptyProgress,
   createMission,
+  createOfficeScene,
   getAdjacentMissionIndex,
   getMissionEndState,
   getTargetSpeed,
@@ -24,6 +27,7 @@ import {
 const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
 const nodes = {
+  app: document.querySelector(".app"),
   score: document.querySelector("#score"),
   caught: document.querySelector("#caught"),
   time: document.querySelector("#time"),
@@ -31,12 +35,21 @@ const nodes = {
   level: document.querySelector("#level"),
   missionTitle: document.querySelector("#missionTitle"),
   taskCopy: document.querySelector("#taskCopy"),
-  progress: document.querySelector("#progress"),
-  progressTrack: document.querySelector("#progressTrack"),
+  coffeeObjective: document.querySelector("#coffeeObjective"),
+  coffeeStatus: document.querySelector("#coffeeStatus"),
+  coffeeProgress: document.querySelector("#coffeeProgress"),
+  activityObjective: document.querySelector("#activityObjective"),
+  activityStatus: document.querySelector("#activityStatus"),
+  activityName: document.querySelector("#activityName"),
+  activityProgress: document.querySelector("#activityProgress"),
   taskDetail: document.querySelector("#taskDetail"),
+  plantRequestStatus: document.querySelector("#plantRequestStatus"),
   message: document.querySelector("#message"),
   start: document.querySelector("#start"),
+  fullscreen: document.querySelector("#fullscreen"),
   music: document.querySelector("#music"),
+  volume: document.querySelector("#volume"),
+  volumeValue: document.querySelector("#volumeValue"),
   missionBrowser: document.querySelector("#missionBrowser"),
   missionBrowserButton: document.querySelector("#missionBrowserButton"),
   closeMissionBrowser: document.querySelector("#closeMissionBrowser"),
@@ -48,8 +61,17 @@ const WIDTH = canvas.width;
 const HEIGHT = canvas.height;
 const targets = [];
 const particles = [];
-const audio = new AmbientAudio();
+const audio = new GameAudio();
+const VOLUME_STORAGE_KEY = "office-mayhem-volume";
 const missionPreviews = new Map();
+const storedVolumeValue = localStorage.getItem(VOLUME_STORAGE_KEY);
+const storedVolume = Number(storedVolumeValue);
+const initialVolume = storedVolumeValue !== null && Number.isFinite(storedVolume)
+  ? Math.max(0, Math.min(100, storedVolume))
+  : 65;
+nodes.volume.value = String(initialVolume);
+nodes.volumeValue.textContent = `${initialVolume}%`;
+audio.setVolume(initialVolume / 100);
 const initialProgress = loadProgress();
 const coffeeQuips = [
   "Caffeine secured. Your hands are union-approved!",
@@ -66,12 +88,19 @@ const state = {
   score: 0,
   incidents: 0,
   timeLeft: 65,
-  task: { coffee: 0, water: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 },
+  task: { coffee: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 },
   spawnClock: 0,
+  nonHotSpawnStreak: 0,
+  coldlessSpawnStreak: 0,
+  plantRequestClock: 0,
+  plantRequestRemaining: 0,
+  plantRequestOrder: [],
+  plantRequestIndex: 0,
+  requestedPlantId: null,
   lastFrame: 0,
   messageClock: 0,
   shake: 0,
-  fernWetUntil: 0,
+  wetPlants: new Map(),
   sortingItemSelected: false,
   pestClock: 0
 };
@@ -120,14 +149,65 @@ function setMessage(text, seconds = 2.3) {
   state.messageClock = seconds;
 }
 
-function formatTaskHint() {
-  const { mission, task } = state;
-  const count = task[mission.taskKind] ?? 0;
-  let detail = `${TASK_LABELS[mission.taskKind]} (${count}/${mission.taskGoal})`;
-  if (mission.taskKind === "sorting" && count < mission.taskGoal) {
-    detail += ` · Next tray: ${["red", "blue", "gold"][mission.sortingSequence[count]]}`;
+function updateCanvasDescription() {
+  const scene = state.mission.scene;
+  canvas.setAttribute("aria-label",
+    `Play the office mission: catch hot coffee, avoid iced coffee, and complete the mission activity. ` +
+    `Office: ${scene.office.name}; ${scene.timeOfDay}, ${scene.weather}; ${scene.plants.length} plants and flowers.`);
+}
+
+function getPlantName(kind) {
+  return ({
+    fern: "fern",
+    cactus: "cactus",
+    succulent: "succulent",
+    daisy: "daisy",
+    tulip: "tulip",
+    sunflower: "sunflower"
+  })[kind] ?? "plant";
+}
+
+function setPlantRequestStatus(text, plant = null) {
+  const node = nodes.plantRequestStatus;
+  node.textContent = text;
+  node.dataset.requesting = String(Boolean(plant));
+  if (plant) {
+    node.dataset.requestingPlant = plant.kind;
+    node.dataset.requestingX = String(plant.x);
+    node.dataset.requestingY = String(plant.y);
+  } else {
+    delete node.dataset.requestingPlant;
+    delete node.dataset.requestingX;
+    delete node.dataset.requestingY;
   }
-  return `Tap the fern (${task.water}/${mission.waterGoal}) · ${detail} · Commendation: zero incidents`;
+}
+
+function formatTaskHint() {
+  const details = ["Commendation: zero incidents"];
+  if (state.requestedPlantId) {
+    const plant = state.mission.scene.plants.find(candidate => candidate.id === state.requestedPlantId);
+    if (plant) details.push(`The ${getPlantName(plant.kind)} is asking for water`);
+  }
+  if (state.mission.taskKind === "sorting" && state.task.sorting < state.mission.taskGoal) {
+    const tray = ["red", "blue", "gold"][state.mission.sortingSequence[state.task.sorting]];
+    if (tray) details.push(`Next tray: ${tray}`);
+  }
+  return details.join(" · ");
+}
+
+function updateObjective(node, statusNode, progressNode, current, goal) {
+  const complete = current >= goal;
+  node.dataset.complete = String(complete);
+  statusNode.textContent = complete ? "✓" : "○";
+  progressNode.textContent = `${current}/${goal}`;
+}
+
+function updateMissionProgress() {
+  const { mission, task } = state;
+  const activityCount = task[mission.taskKind] ?? 0;
+  nodes.activityName.textContent = TASK_LABELS[mission.taskKind];
+  updateObjective(nodes.coffeeObjective, nodes.coffeeStatus, nodes.coffeeProgress, task.coffee, mission.coffeeGoal);
+  updateObjective(nodes.activityObjective, nodes.activityStatus, nodes.activityProgress, activityCount, mission.taskGoal);
 }
 
 function updateMissionPicker() {
@@ -147,7 +227,7 @@ function refreshMissionPreviews() {
 }
 
 function taskDescription(mission) {
-  return `${mission.coffeeGoal} hot coffees · tap fern · ${TASK_LABELS[mission.taskKind]}`;
+  return `${mission.coffeeGoal} hot coffees · care for plants · ${TASK_LABELS[mission.taskKind]}`;
 }
 
 function updateMissionCards() {
@@ -207,9 +287,7 @@ function updateHud() {
   nodes.incidents.textContent = String(state.incidents);
   nodes.level.textContent = `${mission.index + 1}/${MISSION_COUNT}`;
   nodes.missionTitle.textContent = `Mission ${mission.index + 1} · ${mission.title}`;
-  nodes.progressTrack.setAttribute("aria-valuemax", String(mission.coffeeGoal));
-  nodes.progressTrack.setAttribute("aria-valuenow", String(task.coffee));
-  nodes.progress.style.width = `${Math.min(100, task.coffee / mission.coffeeGoal * 100)}%`;
+  updateMissionProgress();
   nodes.taskDetail.textContent = formatTaskHint();
   const resultVisible = state.mode === "missionComplete" || state.mode === "campaignComplete" ||
     state.mode === "failed" || state.mode === "browsing";
@@ -229,7 +307,26 @@ function selectMission(index, preview = missionPreviews.get(index)) {
   }
   state.selectedIndex = index;
   state.mission = preview;
+  updateCanvasDescription();
   state.mode = "ready";
+  state.score = 0;
+  state.incidents = 0;
+  state.timeLeft = preview.durationSeconds;
+  state.task = { coffee: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 };
+  state.spawnClock = 0;
+  state.nonHotSpawnStreak = 0;
+  state.coldlessSpawnStreak = 0;
+  state.plantRequestClock = 0;
+  state.plantRequestRemaining = 0;
+  state.plantRequestOrder = [];
+  state.plantRequestIndex = 0;
+  state.requestedPlantId = null;
+  state.wetPlants.clear();
+  state.sortingItemSelected = false;
+  state.pestClock = 0;
+  targets.length = 0;
+  particles.length = 0;
+  setPlantRequestStatus("The plants are resting.");
   nodes.start.textContent = "Start mission";
   updateMissionDescription();
   updateMissionCards();
@@ -237,19 +334,34 @@ function selectMission(index, preview = missionPreviews.get(index)) {
 }
 
 function startMission() {
+  const sceneSeed = crypto.getRandomValues(new Uint32Array(1))[0];
+  state.mission = Object.freeze({ ...state.mission, scene: createOfficeScene(sceneSeed) });
+  updateCanvasDescription();
   state.score = 0;
   state.incidents = 0;
   state.timeLeft = state.mission.durationSeconds;
-  state.task = { coffee: 0, water: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 };
+  state.task = { coffee: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 };
   state.spawnClock = 0;
+  state.nonHotSpawnStreak = 0;
+  state.coldlessSpawnStreak = 0;
+  state.plantRequestClock = 5;
+  state.plantRequestRemaining = 0;
+  state.plantRequestOrder = state.mission.scene.plants.map(plant => plant.id);
+  state.plantRequestIndex = 0;
+  state.requestedPlantId = null;
+  state.wetPlants.clear();
   state.pestClock = 0;
   state.sortingItemSelected = false;
-  state.fernWetUntil = 0;
+  setPlantRequestStatus("The plants are resting.");
   targets.length = 0;
   particles.length = 0;
   state.mode = "running";
+  audio.prepare().catch(error => {
+    console.error("Could not initialize game audio.", error);
+    setMessage("This browser could not start game audio.", 3);
+  });
   nodes.start.textContent = "Restart mission";
-  setMessage("Go! The phones are buzzing and the fern has a calendar invite.", 3);
+  setMessage("Goal: finish every objective before time runs out. Catch steaming coffee; avoid iced mugs.", 5);
   updateHud();
   canvas.focus({ preventScroll: true });
 }
@@ -257,17 +369,18 @@ function startMission() {
 function persistAndFinish(completed) {
   const saved = saveProgress(completed);
   state.mode = getMissionEndState(state.mission.index, completed);
+  if (completed) audio.playMissionComplete();
   nodes.start.textContent = state.mode === "campaignComplete" ? "Replay a mission" : "Play this mission again";
   state.timeLeft = Math.max(0, state.timeLeft);
   targets.length = 0;
   updateHud();
   if (state.mode === "campaignComplete") {
-    setMessage(`Campaign complete! You are Chief of Everything. The fern gets your office.${saved ? "" : " Progress could not be saved."}`, 99);
+    setMessage(`Campaign complete! You are Chief of Everything. The plants get your office.${saved ? "" : " Progress could not be saved."}`, 99);
   } else if (state.mode === "missionComplete") {
     const earnedBadge = state.progress.perfectMissions.includes(state.mission.index);
     setMessage(`Mission complete! ${earnedBadge ? "Zero-incident commendation earned." : "Try again without incidents for a commendation."}${saved ? "" : " Progress could not be saved."}`, 99);
   } else {
-    setMessage(`Shift over. The phone is still ringing, but at least the fern is hydrated.${saved ? "" : " Progress could not be saved."}`, 99);
+    setMessage(`Shift over. The plants can wait until the next shift.${saved ? "" : " Progress could not be saved."}`, 99);
   }
 }
 
@@ -279,28 +392,73 @@ function tryCompleteMission() {
   return false;
 }
 
-function waterFern() {
-  if (state.mode !== "running" || state.task.water >= state.mission.waterGoal) return;
-  state.task.water++;
+function waterPlant(plant) {
+  if (state.mode !== "running" || state.requestedPlantId !== plant.id) return;
+  state.requestedPlantId = null;
+  state.plantRequestRemaining = 0;
+  state.plantRequestClock = 3;
   state.score += 2;
-  state.fernWetUntil = performance.now() + 1800;
+  state.wetPlants.set(plant.id, performance.now() + 1800);
   audio.play(523.25, .24, "sine", .035);
-  setMessage("Fern watered! It has canceled its performance review.", 2.3);
+  setPlantRequestStatus(`The ${getPlantName(plant.kind)} is watered and happy again.`);
+  setMessage(`Plant watered! The ${getPlantName(plant.kind)} has canceled its performance review.`, 2.3);
   updateHud();
-  tryCompleteMission();
+}
+
+function requestNextPlantWater() {
+  if (state.plantRequestOrder.length === 0) return;
+  const plantId = state.plantRequestOrder[state.plantRequestIndex % state.plantRequestOrder.length];
+  state.plantRequestIndex++;
+  const plant = state.mission.scene.plants.find(candidate => candidate.id === plantId);
+  if (!plant) return;
+  state.requestedPlantId = plant.id;
+  state.plantRequestRemaining = 8;
+  setPlantRequestStatus(`The ${getPlantName(plant.kind)} needs water. Tap it before the request expires.`, plant);
+  audio.playWaterRequest();
+  setMessage(`The ${getPlantName(plant.kind)} needs water! Tap it before time runs out.`, 4);
+}
+
+function updatePlantRequests(dt) {
+  if (state.requestedPlantId) {
+    state.plantRequestRemaining -= dt;
+    if (state.plantRequestRemaining <= 0) {
+      const plant = state.mission.scene.plants.find(candidate => candidate.id === state.requestedPlantId);
+      const penalty = applyPlantRequestExpiry(state.score, state.timeLeft, state.incidents);
+      state.requestedPlantId = null;
+      state.plantRequestRemaining = 0;
+      state.plantRequestClock = 3;
+      state.score = penalty.score;
+      state.timeLeft = penalty.timeLeft;
+      state.incidents = penalty.incidents;
+      setPlantRequestStatus(
+        `The ${getPlantName(plant?.kind)} went unwatered: -2 points, -2 seconds, and an incident. ` +
+        `Score ${state.score}; ${Math.ceil(state.timeLeft)} seconds left; ${state.incidents} incidents.`
+      );
+      setMessage("Plant request missed: -2 points and -2 seconds; incident added.", 3);
+      if (state.timeLeft <= 0) finishFailedMission();
+    }
+  } else {
+    state.plantRequestClock -= dt;
+    if (state.plantRequestClock <= 0) requestNextPlantWater();
+  }
 }
 
 function spawnTarget(now) {
   const { mission, task } = state;
-  const canReport = task.reports < mission.taskGoal;
-  const canPhone = task.phone < mission.taskGoal;
-  const roll = Math.random();
-  let kind = "hot";
-  if (mission.taskKind === "reports" && canReport && roll < .31) kind = "report";
-  else if (mission.taskKind === "phone" && canPhone && roll < .3) kind = "phone";
-  else if (roll < .13) kind = "report";
-  else if (roll < .25) kind = "phone";
-  else if (roll < .5) kind = "cold";
+  const taskPending = mission.taskKind === "reports"
+    ? task.reports < mission.taskGoal
+    : mission.taskKind === "phone" && task.phone < mission.taskGoal;
+  const activeReportCount = targets.filter(target => target.kind === "report").length;
+  const kind = chooseTargetKind(
+    Math.random(),
+    mission.taskKind,
+    taskPending,
+    state.nonHotSpawnStreak,
+    activeReportCount,
+    state.coldlessSpawnStreak
+  );
+  state.nonHotSpawnStreak = kind === "hot" ? 0 : state.nonHotSpawnStreak + 1;
+  state.coldlessSpawnStreak = kind === "cold" ? 0 : state.coldlessSpawnStreak + 1;
   const golden = kind === "hot" && Math.random() < .13;
   const radius = kind === "phone" ? 24 : kind === "report" ? 27 : golden ? 28 : randomBetween(22, 30);
   const angle = randomBetween(0, Math.PI * 2);
@@ -340,67 +498,279 @@ function spawnPest(now) {
   });
 }
 
+function drawCloud(x, y, scale, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, y, 11 * scale, Math.PI, 0);
+  ctx.arc(x + 13 * scale, y - 7 * scale, 14 * scale, Math.PI, 0);
+  ctx.arc(x + 27 * scale, y, 10 * scale, Math.PI, 0);
+  ctx.lineTo(x + 27 * scale, y + 7 * scale);
+  ctx.lineTo(x, y + 7 * scale);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawSky(scene, now, [x, y, width, height]) {
+  const night = scene.timeOfDay === "night";
+  const gradient = ctx.createLinearGradient(0, y, 0, y + height);
+  gradient.addColorStop(0, night ? "#17243d" : scene.office.windowColor);
+  gradient.addColorStop(1, night ? "#59677a" : "#d8e6bc");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x, y, width, height);
+
+  if (night) {
+    ctx.fillStyle = "#f8edc3";
+    ctx.beginPath();
+    ctx.arc(x + width * .77, y + height * .28, 15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#34435e";
+    ctx.beginPath();
+    ctx.arc(x + width * .83, y + height * .23, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#f8f0d4";
+    for (const detail of scene.skyDetails) {
+      ctx.beginPath();
+      ctx.arc(x + detail.x * width, y + detail.y * height, detail.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (scene.weather === "clear" || scene.weather === "cloudy") {
+    ctx.fillStyle = "#ffe39a";
+    ctx.beginPath();
+    ctx.arc(x + width * .78, y + height * .29, 18, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (scene.weather !== "clear") {
+    const cloudColor = night ? "#9aa9bd" : "#f0f1e6";
+    drawCloud(x + width * .18, y + height * .37, .9, cloudColor);
+    drawCloud(x + width * .56, y + height * .54, .72, cloudColor);
+  }
+
+  ctx.fillStyle = scene.office.hills[0];
+  ctx.beginPath();
+  ctx.moveTo(x, y + height * .76);
+  ctx.lineTo(x + width * .22, y + height * .45);
+  ctx.lineTo(x + width * .42, y + height * .78);
+  ctx.lineTo(x + width * .62, y + height * .5);
+  ctx.lineTo(x + width, y + height * .83);
+  ctx.lineTo(x + width, y + height);
+  ctx.lineTo(x, y + height);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = scene.office.hills[1];
+  ctx.fillRect(x, y + height * .84, width, height * .16);
+
+  if (scene.weather === "rain" || scene.weather === "snow") {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, width, height);
+    ctx.clip();
+    for (let index = 0; index < scene.skyDetails.length; index++) {
+      const detail = scene.skyDetails[index];
+      const particleX = x + detail.x * width;
+      const particleY = y + ((detail.y * height + now * (scene.weather === "rain" ? .18 : .035)) % height);
+      if (scene.weather === "rain") {
+        ctx.strokeStyle = "#d7efffbb";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(particleX, particleY);
+        ctx.lineTo(particleX - 4, particleY + 11);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = "#fffef2";
+        ctx.beginPath();
+        ctx.arc(particleX, particleY, detail.size + 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+}
+
+function drawPlant(plant, now, happy = false, requesting = false) {
+  const { x, y, kind, pot } = plant;
+  const soilTop = y - 19;
+  ctx.fillStyle = pot;
+  ctx.beginPath();
+  ctx.moveTo(x - 18, soilTop);
+  ctx.lineTo(x + 18, soilTop);
+  ctx.lineTo(x + 14, y + 12);
+  ctx.lineTo(x - 14, y + 12);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#594333";
+  ctx.fillRect(x - 17, soilTop - 3, 34, 5);
+
+  const leafColor = happy ? "#a7d977" : "#698d5a";
+  ctx.strokeStyle = "#47744f";
+  ctx.lineWidth = 3;
+  if (kind === "fern") {
+    ctx.fillStyle = leafColor;
+    for (let index = 0; index < 5; index++) {
+      ctx.save();
+      ctx.translate(x, soilTop);
+      ctx.rotate((index - 2) * .38 + (happy ? Math.sin(now / 100) * .08 : 0));
+      ctx.beginPath();
+      ctx.ellipse(0, -20, 8, 21, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  } else if (kind === "cactus") {
+    ctx.fillStyle = "#4f9b68";
+    ctx.beginPath();
+    ctx.roundRect(x - 7, y - 55, 14, 37, 7);
+    ctx.roundRect(x - 17, y - 43, 9, 20, 5);
+    ctx.roundRect(x + 8, y - 48, 9, 21, 5);
+    ctx.fill();
+    ctx.strokeStyle = "#c5e5a0";
+    for (let index = -1; index <= 1; index++) {
+      ctx.beginPath();
+      ctx.moveTo(x + index * 5, y - 48);
+      ctx.lineTo(x + index * 5 + 2, y - 44);
+      ctx.stroke();
+    }
+  } else if (kind === "succulent") {
+    ctx.fillStyle = "#83a86c";
+    for (let index = 0; index < 8; index++) {
+      ctx.save();
+      ctx.translate(x, soilTop);
+      ctx.rotate(index * Math.PI / 4);
+      ctx.beginPath();
+      ctx.ellipse(0, -16, 7, 17, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  } else {
+    const flowerColor = kind === "tulip" ? "#ed7a83" :
+      kind === "sunflower" ? "#ffd166" : "#f4e8d2";
+    ctx.strokeStyle = "#5b8a54";
+    ctx.beginPath();
+    ctx.moveTo(x, soilTop);
+    ctx.lineTo(x, y - 45);
+    ctx.stroke();
+    ctx.fillStyle = "#5b9b61";
+    ctx.beginPath();
+    ctx.ellipse(x - 6, y - 29, 8, 4, -.45, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = flowerColor;
+    if (kind === "tulip") {
+      ctx.beginPath();
+      ctx.ellipse(x, y - 49, 9, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      for (let index = 0; index < 8; index++) {
+        ctx.save();
+        ctx.translate(x, y - 49);
+        ctx.rotate(index * Math.PI / 4);
+        ctx.beginPath();
+        ctx.ellipse(0, -8, 4, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+    ctx.fillStyle = kind === "sunflower" ? "#744b2d" : "#e6b94f";
+    ctx.beginPath();
+    ctx.arc(x, y - 49, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (requesting) {
+    ctx.fillStyle = "#203229";
+    ctx.beginPath();
+    ctx.roundRect(x - 42, y - 64, 84, 24, 8);
+    ctx.fill();
+    ctx.strokeStyle = "#ffd18a";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = "#ffd18a";
+    ctx.font = "bold 11px Trebuchet MS, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("WATER ME!", x, y - 48);
+    ctx.textAlign = "start";
+  }
+}
+
 function drawBackground(now) {
-  const sky = ctx.createLinearGradient(0, 0, 0, HEIGHT);
-  sky.addColorStop(0, "#bac9b8");
-  sky.addColorStop(.63, "#e4d6b8");
-  sky.addColorStop(.64, "#b78c60");
-  sky.addColorStop(1, "#92704f");
-  ctx.fillStyle = sky;
+  const { office, plants } = state.mission.scene;
+  const wall = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+  wall.addColorStop(0, office.wall[0]);
+  wall.addColorStop(.63, office.wall[1]);
+  wall.addColorStop(.64, office.floor);
+  wall.addColorStop(1, office.deskFront);
+  ctx.fillStyle = wall;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-  ctx.fillStyle = "#536861";
-  ctx.fillRect(35, 36, 285, 150);
-  ctx.fillStyle = "#a8d2c3";
-  ctx.fillRect(44, 45, 267, 132);
-  ctx.fillStyle = "#83b8aa";
-  ctx.beginPath();
-  ctx.arc(255, 77, 21, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#80a58b";
-  ctx.beginPath();
-  ctx.moveTo(44, 163); ctx.lineTo(105, 105); ctx.lineTo(159, 155);
-  ctx.lineTo(210, 111); ctx.lineTo(311, 170); ctx.lineTo(311, 177); ctx.lineTo(44, 177);
-  ctx.fill();
-  ctx.fillStyle = "#536861";
-  ctx.fillRect(174, 45, 7, 132);
-  ctx.fillRect(44, 107, 267, 7);
+  const [windowX, windowY, windowWidth, windowHeight] = office.windowRect;
+  ctx.fillStyle = office.windowFrame;
+  ctx.fillRect(windowX, windowY, windowWidth, windowHeight);
+  const view = [windowX + 9, windowY + 9, windowWidth - 18, windowHeight - 18];
+  drawSky(state.mission.scene, now, view);
+  ctx.fillStyle = office.windowFrame;
+  for (let index = 1; index <= office.windowMullions; index++) {
+    const mullionX = windowX + windowWidth * index / (office.windowMullions + 1) - 3;
+    ctx.fillRect(mullionX, windowY + 8, 6, windowHeight - 16);
+  }
+  ctx.fillRect(windowX + 8, windowY + windowHeight * .55, windowWidth - 16, 6);
 
-  ctx.fillStyle = "#7d6248";
-  ctx.fillRect(748, 93, 157, 241);
-  ctx.fillStyle = "#a78963";
-  ctx.fillRect(758, 104, 137, 104);
-  ctx.fillRect(758, 219, 137, 104);
-  ctx.fillStyle = "#d9cba8";
-  ctx.fillRect(814, 150, 26, 5);
-  ctx.fillRect(814, 265, 26, 5);
-  ctx.fillStyle = "#705741";
+  if (office.name === "Bluebird Studio") {
+    ctx.fillStyle = "#e7dfcd";
+    ctx.beginPath();
+    ctx.arc(492, 92, 29, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#536275";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.fillRect(490, 72, 4, 21);
+    ctx.fillRect(491, 91, 16, 4);
+  } else if (office.name === "Sunroom Annex") {
+    ctx.fillStyle = "#597b5d";
+    ctx.fillRect(414, 72, 112, 6);
+    ctx.fillRect(424, 78, 6, 39);
+    ctx.fillRect(504, 78, 6, 29);
+  } else if (office.name === "Nightshift Nook") {
+    ctx.fillStyle = "#30394e";
+    ctx.fillRect(410, 63, 132, 72);
+    ctx.fillStyle = "#b8c7d2";
+    ctx.fillRect(422, 76, 26, 17);
+    ctx.fillRect(460, 76, 26, 17);
+    ctx.fillRect(498, 76, 31, 17);
+    ctx.fillRect(422, 104, 106, 18);
+  } else {
+    ctx.fillStyle = "#657b66";
+    ctx.fillRect(421, 65, 104, 66);
+    ctx.fillStyle = "#f0d9a8";
+    ctx.fillRect(428, 72, 90, 52);
+    ctx.fillStyle = "#d18b69";
+    ctx.beginPath();
+    ctx.arc(473, 98, 17, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const [doorX, doorY, doorWidth, doorHeight] = office.doorRect;
+  ctx.fillStyle = office.door[0];
+  ctx.fillRect(doorX, doorY, doorWidth, doorHeight);
+  ctx.fillStyle = office.door[1];
+  ctx.fillRect(doorX + 10, doorY + 11, doorWidth - 20, doorHeight * .43);
+  ctx.fillRect(doorX + 10, doorY + doorHeight * .52, doorWidth - 20, doorHeight * .43);
+  ctx.fillStyle = office.trim;
+  ctx.fillRect(doorX + doorWidth * .42, doorY + 57, 26, 5);
+  ctx.fillRect(doorX + doorWidth * .42, doorY + doorHeight * .71, 26, 5);
+  ctx.fillStyle = office.desk;
   ctx.fillRect(0, 394, WIDTH, 23);
-  ctx.fillStyle = "#664c38";
+  ctx.fillStyle = office.deskFront;
   ctx.fillRect(0, 417, WIDTH, 123);
 
-  const fernHappy = now < state.fernWetUntil;
-  ctx.fillStyle = "#b78c60";
-  ctx.fillRect(672, 345, 38, 48);
-  ctx.fillStyle = fernHappy ? "#83b85f" : "#658363";
-  for (let i = 0; i < 5; i++) {
-    ctx.save();
-    ctx.translate(691, 351);
-    ctx.rotate((i - 2) * .38 + (fernHappy ? Math.sin(now / 100) * .08 : 0));
-    ctx.beginPath();
-    ctx.ellipse(0, -20, 8, 21, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+  for (const plant of plants) {
+    const wetUntil = state.wetPlants.get(plant.id) ?? 0;
+    drawPlant(plant, now, now < wetUntil, state.requestedPlantId === plant.id);
   }
   drawActivityStations(now);
   ctx.fillStyle = "#534536";
   ctx.font = "bold 15px Trebuchet MS, sans-serif";
-  ctx.fillText("Q3 GOALS", 62, 212);
+  ctx.fillText(office.name.toUpperCase(), 62, 212);
   ctx.font = "12px Trebuchet MS, sans-serif";
-  ctx.fillText("1. Catch mugs", 62, 234);
-  ctx.fillText("2. Silence phone", 62, 253);
-  ctx.fillText("3. Water fern", 62, 272);
-  ctx.fillText("it is watching", 76, 289);
+  ctx.fillText("The office has opinions.", 62, 234);
+  ctx.fillText("Please address them.", 62, 253);
 
   ctx.fillStyle = "#e9e0cc";
   ctx.save();
@@ -415,7 +785,8 @@ function drawBackground(now) {
   ctx.restore();
   ctx.fillStyle = "#f7f4e9dd";
   ctx.font = "bold 13px Trebuchet MS, sans-serif";
-  ctx.fillText(state.mode === "running" ? "BREAK ROOM INCIDENT IN PROGRESS" : "BREAK ROOM · 9:01 AM", 351, 34);
+  const scene = state.mission.scene;
+  ctx.fillText(`${scene.office.name.toUpperCase()} · ${scene.timeOfDay.toUpperCase()} · ${scene.weather.toUpperCase()}`, 351, 34);
 }
 
 function drawActivityStations(now) {
@@ -740,7 +1111,7 @@ function finishFailedMission() {
   targets.length = 0;
   nodes.start.textContent = "Play this mission again";
   updateHud();
-  setMessage(`Shift over. The phone is still ringing, but at least the fern is hydrated.${saved ? "" : " Progress could not be saved."}`, 99);
+  setMessage(`Shift over. The plants can wait until the next shift.${saved ? "" : " Progress could not be saved."}`, 99);
 }
 
 function update(dt, now) {
@@ -751,6 +1122,8 @@ function update(dt, now) {
     finishFailedMission();
     return;
   }
+  updatePlantRequests(dt);
+  if (state.mode !== "running") return;
   state.spawnClock -= dt;
   if (state.spawnClock <= 0 && targets.length < state.mission.maxTargets) {
     spawnTarget(now);
@@ -796,7 +1169,7 @@ function hitTarget(target) {
   if (result.progress) state.task[result.progress]++;
   if (target.kind === "cold") {
     state.shake = 7;
-    audio.play(145, .2, "sine", .04);
+    audio.playColdCoffee();
     setMessage("ICED COFFEE! Two seconds lost to the workplace hazard report.", 2.5);
   } else if (target.kind === "phone") {
     audio.play(659.25, .17, "sine", .03);
@@ -808,7 +1181,7 @@ function hitTarget(target) {
     audio.play(392, .18, "triangle", .04);
     setMessage("Pest tapped! The fern has requested a tiny security detail.", 2.2);
   } else {
-    audio.play(target.golden ? 1046.5 : 740, .16, "sine", .025);
+    audio.playHotCoffee(target.golden);
     for (let index = 0; index < 8; index++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = randomBetween(35, 120);
@@ -888,11 +1261,6 @@ canvas.addEventListener("pointerdown", event => {
   if (state.mode !== "running") return;
   event.preventDefault();
   const point = canvasPoint(event);
-  if (state.mission.waterGoal > state.task.water &&
-      point.x >= 646 && point.x <= 738 && point.y >= 326 && point.y <= 404) {
-    waterFern();
-    return;
-  }
   if (tapPrinterPart(point) || tapSortingStation(point)) return;
   for (let index = targets.length - 1; index >= 0; index--) {
     const target = targets[index];
@@ -901,8 +1269,14 @@ canvas.addEventListener("pointerdown", event => {
     if (dx * dx + dy * dy <= (target.r + 11) ** 2) {
       targets.splice(index, 1);
       hitTarget(target);
-      break;
+      return;
     }
+  }
+  const plant = state.mission.scene.plants.find(candidate =>
+    Math.abs(point.x - candidate.x) <= 24 && point.y >= candidate.y - 65 && point.y <= candidate.y + 15);
+  if (plant) {
+    waterPlant(plant);
+    return;
   }
 });
 
@@ -927,15 +1301,48 @@ nodes.closeMissionBrowser.addEventListener("click", () => nodes.missionBrowser.c
 nodes.previousMission.addEventListener("click", () => moveMission(-1));
 nodes.nextMission.addEventListener("click", () => moveMission(1));
 nodes.start.addEventListener("click", startMission);
+function syncFullscreenButton() {
+  const active = document.fullscreenElement === nodes.app;
+  nodes.fullscreen.setAttribute("aria-pressed", String(active));
+  nodes.fullscreen.setAttribute("aria-label", active ? "Exit fullscreen" : "Enter fullscreen");
+  nodes.fullscreen.textContent = active ? "Exit fullscreen" : "Full screen";
+}
+
+nodes.fullscreen.addEventListener("click", async () => {
+  try {
+    if (document.fullscreenElement === nodes.app) {
+      await document.exitFullscreen();
+    } else if (typeof nodes.app.requestFullscreen === "function" && document.fullscreenEnabled) {
+      await nodes.app.requestFullscreen();
+    } else {
+      setMessage("Fullscreen is not available in this browser.", 3);
+    }
+  } catch (error) {
+    console.error("Could not change fullscreen mode.", error);
+    setMessage("Fullscreen could not be changed. Check your browser permissions.", 3);
+  }
+});
+document.addEventListener("fullscreenchange", syncFullscreenButton);
 nodes.music.addEventListener("click", async () => {
   try {
-    const enabled = await audio.toggle();
+    const enabled = await audio.toggleMusic();
     nodes.music.setAttribute("aria-pressed", String(enabled));
-    nodes.music.textContent = enabled ? "♫ Ambient: On" : "♫ Ambient: Off";
-    setMessage(enabled ? "Slow office-day ambience activated." : "Quiet mode. The fern approves.", 2.5);
+    nodes.music.textContent = enabled ? "♫ Music: On" : "♫ Music: Off";
+    setMessage(enabled ? "The original office tune is back." : "Quiet mode. The fern approves.", 2.5);
   } catch (error) {
-    console.error("Could not initialize ambient audio.", error);
-    setMessage("This browser could not start ambient audio.", 3);
+    console.error("Could not initialize music.", error);
+    setMessage("This browser could not start music.", 3);
+  }
+});
+nodes.volume.addEventListener("input", () => {
+  const volume = Number(nodes.volume.value);
+  audio.setVolume(volume / 100);
+  nodes.volumeValue.textContent = `${volume}%`;
+  try {
+    localStorage.setItem(VOLUME_STORAGE_KEY, String(volume));
+  } catch (error) {
+    console.error("Could not save the Office Mayhem volume setting.", error);
+    setMessage("Volume changed, but the setting could not be saved.", 3);
   }
 });
 
@@ -954,8 +1361,10 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
+updateCanvasDescription();
 updateMissionPicker();
 updateHud();
+syncFullscreenButton();
 nodes.missionBrowser.showModal();
 requestAnimationFrame(now => {
   state.lastFrame = now;

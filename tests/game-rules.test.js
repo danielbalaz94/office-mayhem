@@ -3,11 +3,14 @@ import assert from "node:assert/strict";
 import {
   MISSION_COUNT,
   TASKS,
+  applyPlantRequestExpiry,
   applyTargetExpiry,
   applyTargetHit,
   clampMissionTime,
+  chooseTargetKind,
   createEmptyProgress,
   createMission,
+  createOfficeScene,
   getAdjacentMissionIndex,
   getMissionBadges,
   getMissionEndState,
@@ -27,6 +30,27 @@ test("procedural missions are deterministic for the same result and seed", () =>
   assert.ok(new Set([...variants].map(value => JSON.parse(value).durationSeconds)).size > 1);
 });
 
+test("procedural office scenes vary locally with distinct layouts, weather, and plants", () => {
+  const first = createOfficeScene(121);
+  assert.deepEqual(createOfficeScene(121), first);
+  assert.notDeepEqual(createOfficeScene(122), first);
+  const scenes = Array.from({ length: 80 }, (_, seed) => createOfficeScene(seed + 1));
+
+  assert.ok(new Set(scenes.map(scene => scene.office.name)).size > 1);
+  assert.ok(new Set(scenes.map(scene => scene.timeOfDay)).has("day"));
+  assert.ok(new Set(scenes.map(scene => scene.timeOfDay)).has("night"));
+  assert.ok(new Set(scenes.map(scene => scene.weather)).has("rain"));
+  assert.ok(new Set(scenes.map(scene => scene.weather)).has("snow"));
+  for (const scene of scenes) {
+    assert.ok(["clear", "cloudy", "rain", "snow"].includes(scene.weather));
+    assert.ok(scene.plants.length >= 2 && scene.plants.length <= 4);
+    assert.ok(scene.plants.some(plant => plant.kind === "fern"));
+    assert.ok(scene.plants.some(plant => ["daisy", "tulip", "sunflower"].includes(plant.kind)));
+    assert.equal(new Set(scene.plants.map(plant => plant.x)).size, scene.plants.length);
+    assert.ok(scene.plants.every(plant => plant.y === 366 && typeof plant.pot === "string"));
+  }
+});
+
 test("nine fixed missions progressively introduce distinct activity types", () => {
   assert.equal(MISSION_COUNT, 9);
   assert.deepEqual(TASKS, ["phone", "reports", "phone", "reports", "phone", "reports", "printer", "sorting", "pests"]);
@@ -44,10 +68,10 @@ test("later missions are measurably faster and more demanding than early mission
   assert.ok(hard.speedMultiplier > easy.speedMultiplier);
   assert.ok(hard.spawnInterval < easy.spawnInterval);
   assert.ok(hard.bonusSpeedMultiplier > hard.speedMultiplier);
-  assert.equal(easy.waterGoal, 1);
   for (const kind of ["hot", "phone", "report"]) {
     assert.ok(getTargetSpeed(100, hard, kind) > getTargetSpeed(100, easy, kind));
   }
+  assert.ok(getTargetSpeed(100, easy, "cold") > getTargetSpeed(100, easy, "hot"));
   assert.ok(getTargetSpeed(100, easy, "hot", true) > getTargetSpeed(100, easy, "hot"));
   assert.throws(() => getTargetSpeed(100, easy, "bug"), RangeError);
 });
@@ -145,12 +169,17 @@ test("ignoring phones and pests incurs penalties while harder missions penalize 
   assert.equal(applyTargetExpiry("hot", easy).incidents, 1);
 });
 
-test("a mission requires coffee, watering, and its selected activity", () => {
+test("missed plant requests cost points, time, and an incident", () => {
+  assert.deepEqual(applyPlantRequestExpiry(5, 30, 2), { score: 3, timeLeft: 28, incidents: 3 });
+  assert.deepEqual(applyPlantRequestExpiry(1, 1, 0), { score: 0, timeLeft: 0, incidents: 1 });
+  assert.throws(() => applyPlantRequestExpiry(-1, 1, 0), RangeError);
+});
+
+test("a mission requires coffee and its selected activity, not plant watering", () => {
   for (const missionIndex of [0, 6, 7, 8]) {
     const mission = createMission(missionIndex, 20, 77);
-    const progress = { coffee: mission.coffeeGoal, water: mission.waterGoal, [mission.taskKind]: mission.taskGoal };
+    const progress = { coffee: mission.coffeeGoal, [mission.taskKind]: mission.taskGoal };
     assert.equal(isMissionComplete(mission, progress), true);
-    assert.equal(isMissionComplete(mission, { ...progress, water: mission.waterGoal - 1 }), false);
     assert.equal(isMissionComplete(mission, { ...progress, [mission.taskKind]: mission.taskGoal - 1 }), false);
   }
 });
@@ -159,6 +188,40 @@ test("mission time rewards never exceed the duration or fall below zero", () => 
   assert.equal(clampMissionTime(64, 5, 65), 65);
   assert.equal(clampMissionTime(1, -3, 65), 0);
   assert.equal(clampMissionTime(20, 4, 65), 24);
+});
+
+test("hot coffee is guaranteed after at most two non-hot spawn selections", () => {
+  const sequence = [0, .1, .2, .3, .4, .5, .6, .7, .8, .9];
+  let nonHotStreak = 0;
+  const selected = sequence.map(roll => {
+    const kind = chooseTargetKind(roll, "phone", true, nonHotStreak);
+    nonHotStreak = kind === "hot" ? 0 : nonHotStreak + 1;
+    return kind;
+  });
+  assert.ok(selected.some(kind => kind === "phone"));
+  assert.ok(selected.some(kind => kind === "cold"));
+  assert.ok(selected.some(kind => kind === "hot"));
+  for (let index = 2; index < selected.length; index++) {
+    assert.notEqual(selected.slice(index - 2, index + 1).every(kind => kind !== "hot"), true);
+  }
+  assert.equal(chooseTargetKind(0, "phone", true, 2), "hot");
+  assert.throws(() => chooseTargetKind(1, "phone", true), RangeError);
+  assert.throws(() => chooseTargetKind(.5, "phone", true, -1), RangeError);
+});
+
+test("iced mugs appear regularly and report mugs never spawn while one is active", () => {
+  const counts = { cold: 0, report: 0, phone: 0, hot: 0 };
+  for (let step = 0; step < 1000; step++) {
+    const kind = chooseTargetKind(step / 1000, null, false);
+    counts[kind]++;
+  }
+  assert.ok(counts.cold >= 300);
+  assert.ok(counts.report >= 100);
+  assert.equal(chooseTargetKind(.3, "reports", true, 0, 1), "cold");
+  assert.equal(chooseTargetKind(.1, "reports", true, 0, 0), "report");
+  assert.equal(chooseTargetKind(.8, null, false, 0, 0, 3), "cold");
+  assert.equal(chooseTargetKind(.8, null, false, 2, 3), "hot");
+  assert.throws(() => chooseTargetKind(.5, "phone", true, 0, -1), RangeError);
 });
 
 test("commendations distinguish mission completion, incident-free shifts, and campaign finale", () => {

@@ -27,6 +27,119 @@ const TITLES = Object.freeze([
   ["Pest Employee of the Month", "Fernageddon II", "The Bug Meeting"]
 ]);
 
+const OFFICE_STYLES = Object.freeze([
+  Object.freeze({
+    name: "Maple Corner Office",
+    wall: ["#bac9b8", "#e4d6b8"],
+    windowFrame: "#536861",
+    windowColor: "#a8d2c3",
+    windowRect: [35, 36, 285, 150],
+    windowMullions: 2,
+    hills: ["#83b8aa", "#80a58b"],
+    floor: "#b78c60",
+    desk: "#705741",
+    deskFront: "#664c38",
+    door: ["#7d6248", "#a78963"],
+    doorRect: [748, 93, 157, 241],
+    trim: "#d9cba8"
+  }),
+  Object.freeze({
+    name: "Bluebird Studio",
+    wall: ["#aebfce", "#e5d7c5"],
+    windowFrame: "#445a70",
+    windowColor: "#a9d7e8",
+    windowRect: [45, 27, 218, 159],
+    windowMullions: 1,
+    hills: ["#7eacc0", "#819b87"],
+    floor: "#9b765e",
+    desk: "#795741",
+    deskFront: "#634734",
+    door: ["#635875", "#a291ad"],
+    doorRect: [770, 111, 135, 223],
+    trim: "#dfd1b5"
+  }),
+  Object.freeze({
+    name: "Sunroom Annex",
+    wall: ["#d1c6a4", "#efe1bd"],
+    windowFrame: "#6d6549",
+    windowColor: "#b5d8ab",
+    windowRect: [24, 42, 340, 142],
+    windowMullions: 3,
+    hills: ["#a3bf78", "#779468"],
+    floor: "#b78c60",
+    desk: "#76523c",
+    deskFront: "#5d412f",
+    door: ["#86634c", "#c39d70"],
+    doorRect: [748, 93, 157, 241],
+    trim: "#eee0b8"
+  }),
+  Object.freeze({
+    name: "Nightshift Nook",
+    wall: ["#53617c", "#77748a"],
+    windowFrame: "#30394e",
+    windowColor: "#293954",
+    windowRect: [68, 43, 214, 128],
+    windowMullions: 2,
+    hills: ["#43546d", "#33455a"],
+    floor: "#665b61",
+    desk: "#594538",
+    deskFront: "#47372f",
+    door: ["#56475d", "#7a6875"],
+    doorRect: [748, 93, 157, 241],
+    trim: "#c5b6a1"
+  })
+]);
+
+const PLANT_SLOTS = Object.freeze([95, 205, 315, 455, 565, 830]);
+const FLOWER_KINDS = Object.freeze(["daisy", "tulip", "sunflower"]);
+const OTHER_PLANT_KINDS = Object.freeze(["cactus", "succulent", ...FLOWER_KINDS]);
+
+function buildOfficeScene(random) {
+  const office = OFFICE_STYLES[Math.floor(random() * OFFICE_STYLES.length)];
+  const timeOfDay = random() < .72 ? "day" : "night";
+  const weather = ["clear", "cloudy", "rain", "snow"][Math.floor(random() * 4)];
+  const plantCount = 2 + Math.floor(random() * 3);
+  const availableSlots = [...PLANT_SLOTS];
+  const plants = [{
+    id: "fern",
+    kind: "fern",
+    x: 691,
+    y: 366,
+    pot: ["#b78c60", "#c1845b", "#a57458"][Math.floor(random() * 3)]
+  }];
+  const firstFlower = FLOWER_KINDS[Math.floor(random() * FLOWER_KINDS.length)];
+  for (let index = 1; index < plantCount; index++) {
+    const slotIndex = Math.floor(random() * availableSlots.length);
+    const x = availableSlots.splice(slotIndex, 1)[0];
+    const kind = index === 1
+      ? firstFlower
+      : OTHER_PLANT_KINDS[Math.floor(random() * OTHER_PLANT_KINDS.length)];
+    plants.push({
+      id: `plant-${index + 1}`,
+      kind,
+      x,
+      y: 366,
+      pot: ["#b78c60", "#c1845b", "#a57458"][Math.floor(random() * 3)]
+    });
+  }
+  const skyDetails = Array.from({ length: 12 }, () => ({
+    x: random(),
+    y: random(),
+    size: 1 + random() * 2
+  }));
+  return Object.freeze({
+    office,
+    timeOfDay,
+    weather,
+    plants: Object.freeze(plants.map(plant => Object.freeze(plant))),
+    skyDetails: Object.freeze(skyDetails.map(detail => Object.freeze(detail)))
+  });
+}
+
+export function createOfficeScene(seed) {
+  return buildOfficeScene(createSeededRandom(seed));
+}
+
 function assertMissionIndex(missionIndex) {
   if (!Number.isInteger(missionIndex) || missionIndex < 0 || missionIndex >= MISSION_COUNT) {
     throw new RangeError(`Mission index must be between 0 and ${MISSION_COUNT - 1}.`);
@@ -68,7 +181,6 @@ export function createMission(missionIndex, careerPoints = 0, seed = missionInde
     title,
     durationSeconds: 68 + missionIndex * 4 + Math.floor(random() * 5),
     coffeeGoal: 5 + missionIndex + Math.floor(random() * 2),
-    waterGoal: 1,
     taskKind,
     taskGoal,
     sortingSequence: Object.freeze(sortingSequence),
@@ -77,7 +189,8 @@ export function createMission(missionIndex, careerPoints = 0, seed = missionInde
     maxTargets: 3 + Math.floor(missionIndex / 3) + difficultyTier,
     speedMultiplier: .78 + missionIndex * .05 + difficultyTier * .11 + random() * .04,
     bonusSpeedMultiplier: 1.32 + missionIndex * .04 + difficultyTier * .07 + random() * .15,
-    phoneExpiryPenalty: 3 + difficultyTier
+    phoneExpiryPenalty: 3 + difficultyTier,
+    scene: buildOfficeScene(random)
   });
 }
 
@@ -183,7 +296,44 @@ export function getTargetSpeed(baseSpeed, mission, kind, golden = false) {
     throw new RangeError(`Unknown target kind: ${kind}`);
   }
   const bonus = golden || kind === "report" || kind === "phone";
-  return baseSpeed * mission.speedMultiplier * (bonus ? mission.bonusSpeedMultiplier : 1);
+  const hazardMultiplier = kind === "cold" ? 1.28 : 1;
+  return baseSpeed * mission.speedMultiplier * (bonus ? mission.bonusSpeedMultiplier : 1) * hazardMultiplier;
+}
+
+export function chooseTargetKind(
+  roll,
+  taskKind,
+  taskPending,
+  nonHotStreak = 0,
+  activeReportCount = 0,
+  coldlessStreak = 0
+) {
+  if (!Number.isFinite(roll) || roll < 0 || roll >= 1) {
+    throw new RangeError("Target roll must be between 0 (inclusive) and 1 (exclusive).");
+  }
+  if (!Number.isInteger(nonHotStreak) || nonHotStreak < 0) {
+    throw new RangeError("Non-hot target streak must be a non-negative integer.");
+  }
+  if (!Number.isInteger(activeReportCount) || activeReportCount < 0 ||
+      !Number.isInteger(coldlessStreak) || coldlessStreak < 0) {
+    throw new RangeError("Active report count and coldless streak must be non-negative integers.");
+  }
+  if (nonHotStreak >= 2) return "hot";
+  if (coldlessStreak >= 3) return "cold";
+
+  const missionTarget = taskPending && taskKind === "phone"
+    ? "phone"
+    : taskPending && taskKind === "reports" && activeReportCount === 0
+      ? "report"
+      : null;
+  const missionTargetChance = missionTarget ? .24 : 0;
+  if (missionTarget && roll < missionTargetChance) return missionTarget;
+
+  const regularRoll = (roll - missionTargetChance) / (1 - missionTargetChance);
+  if (regularRoll < .32) return "cold";
+  if (regularRoll < .44) return activeReportCount === 0 ? "report" : "cold";
+  if (regularRoll < .58) return "phone";
+  return "hot";
 }
 
 export function recordMissionResult(progress, missionIndex, score, completed = true, incidents = 0) {
@@ -242,9 +392,21 @@ export function applyTargetExpiry(kind, mission) {
   return { timeDelta: 0, incidents: kind === "hot" ? 1 : 0 };
 }
 
+export function applyPlantRequestExpiry(score, timeLeft, incidents) {
+  if (!Number.isFinite(score) || score < 0 ||
+      !Number.isFinite(timeLeft) || timeLeft < 0 ||
+      !Number.isSafeInteger(incidents) || incidents < 0) {
+    throw new RangeError("Plant request expiry state must contain non-negative score, time, and incidents.");
+  }
+  return {
+    score: Math.max(0, score - 2),
+    timeLeft: Math.max(0, timeLeft - 2),
+    incidents: incidents + 1
+  };
+}
+
 export function isMissionComplete(mission, progress) {
   return progress.coffee >= mission.coffeeGoal &&
-    progress.water >= mission.waterGoal &&
     progress[mission.taskKind] >= mission.taskGoal;
 }
 

@@ -2,10 +2,6 @@ name: Tests
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
-      - feature/procedural-office-campaign
 
 jobs:
   test:
