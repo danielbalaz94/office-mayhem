@@ -1,6 +1,6 @@
 # Office Mayhem
 
-A chaotic little office game about catching coffee, keeping a fern alive, and silencing phones before the whole team stops working to watch a notification.
+A chaotic office game about catching coffee, rescuing a fern, unjamming a printer, sorting urgent documents, and surviving a frankly unnecessary number of notifications.
 
 ## Play online
 
@@ -16,12 +16,12 @@ The page uses JavaScript modules, so serve it over HTTP instead of opening `inde
 
 ## How to play
 
-1. Choose any unlocked mission from the mission menu and select **Start mission**.
-2. Catch steaming hot coffee; avoid iced coffee. Tap the fern or use **Water fern** when the plant task is active.
-3. The generated side objective asks you to silence ringing phones or catch yellow report mugs. Bonus targets move faster, so aim carefully.
-4. Complete the coffee, watering, and side-task objectives before the shift timer runs out.
-5. Earn career points to unlock harder missions. Your score, unlocked missions, and best scores are saved in this browser.
-6. Select and replay unlocked missions at any time. The six-mission campaign has a real finale; it does not loop endlessly.
+1. Choose a mission card from the **Missions** board. Completing a mission unlocks the next one.
+2. Catch steaming hot coffee; avoid iced coffee. Click or tap the fern itself when it needs water.
+3. Complete the mission activity: silence phones, catch yellow report mugs, clear printer parts in order, sort documents by tray color, or tap pests before they reach the fern.
+4. Finish every objective before the shift timer runs out. Early missions have slower targets; later missions become faster.
+5. Finish without incidents to earn a commendation. High scores and personal bests are optional performance goals, not the only progression.
+6. After a shift, use the nearby retry, previous/next mission, or mission-board controls. Your progress, commendations, and best scores are saved in this browser.
 
 ## Targets and tasks
 
@@ -32,11 +32,14 @@ The page uses JavaScript modules, so serve it over HTTP instead of opening `inde
 | **Iced coffee** | Mug marked with a snowflake | Avoid it; clicking costs 2 seconds and adds an incident. |
 | **Report mug** | Bright yellow mug with a report label and dark `!` | +2 points, 1.5 seconds, and progress on report missions. |
 | **Ringing phone** | Blue phone with a countdown ring | Tap it for +3 points and a second; letting it expire distracts the office and costs time. |
-| **Office fern** | Plant on the desk or the **Water fern** button | Water it to complete the mission chore and earn 2 points. |
+| **Office fern** | Plant on the desk | Tap it to water it and complete the mission chore. |
+| **Jammed printer** | Three numbered, blinking lights | Tap the printer parts in the displayed order. |
+| **Urgent documents** | Paper above three color-coded trays | Pick up the document and tap the tray with the matching color. |
+| **Fern pests** | Wiggling bugs crawling toward the fern | Tap each pest before it reaches the plant. |
 
-Missions last about 65–94 seconds. Their coffee goals, side task, time, target speed, and spawn rate are generated from the selected mission and career results. A stronger performance can make later missions faster and busier. New mission variations use no external assets.
+The finite nine-mission campaign introduces new activities gradually. A completed mission unlocks the next; replaying a mission can improve its best score but does not unlock more missions. Legacy six-mission saves are migrated so existing scores and progress are retained.
 
-Music is optional and generated in the browser with Web Audio. Select **Ambient: Off** to start the slow, relaxing ambient soundtrack; select it again to stop. Browsers require a user action before audio can play.
+Ambient audio is optional and generated in the browser with Web Audio. Select **Ambient: Off** to start it; select it again to stop. Browsers require a user action before audio can play.
 
 ## Tests
 
@@ -46,7 +49,7 @@ npx playwright install chromium
 npm test
 ```
 
-`npm test` runs the Node built-in game-rule and color-contrast tests plus Playwright browser checks for mission selection, watering, audio controls, and mobile portrait/landscape layouts and touch input.
+`npm test` runs Node game-rule/audio/contrast tests and Playwright browser checks for mission cards, legacy-save migration, direct plant watering, the new activities, bundled music, and mobile portrait/landscape layouts and touch input.
 
 ## Project files
 

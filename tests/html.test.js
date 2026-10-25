@@ -8,6 +8,8 @@ test("HTML stays clean and loads its separated stylesheet and JavaScript module"
   const html = await readFile(htmlUrl, "utf8");
   assert.match(html, /<link rel="stylesheet" href="\.\/styles\.css">/);
   assert.match(html, /<script type="module" src="\.\/src\/main\.js"><\/script>/);
+  assert.match(html, /<dialog id="missionBrowser"/);
+  assert.doesNotMatch(html, /missionSelect/);
   assert.doesNotMatch(html, /<style(?:\s|>)/i);
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/i);
   assert.doesNotMatch(html, /\sstyle=/i);

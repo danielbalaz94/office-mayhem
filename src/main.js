@@ -3,15 +3,20 @@ import { REPORT_PALETTE } from "./palette.js";
 import {
   MISSION_COUNT,
   PROGRESS_STORAGE_KEY,
-  UNLOCK_THRESHOLDS,
+  LEGACY_PROGRESS_STORAGE_KEY,
+  TASK_LABELS,
   applyTargetExpiry,
   applyTargetHit,
   clampMissionTime,
   createEmptyProgress,
   createMission,
+  getAdjacentMissionIndex,
   getMissionEndState,
-  getUnlockedMissionCount,
+  getTargetSpeed,
+  getUnlockedMissionIndices,
+  isMissionUnlocked,
   isMissionComplete,
+  migrateLegacyProgress,
   recordMissionResult,
   sanitizeProgress
 } from "./game-rules.js";
@@ -29,18 +34,23 @@ const nodes = {
   progress: document.querySelector("#progress"),
   progressTrack: document.querySelector("#progressTrack"),
   taskDetail: document.querySelector("#taskDetail"),
-  missionSelect: document.querySelector("#missionSelect"),
-  missionHint: document.querySelector("#missionHint"),
-  water: document.querySelector("#water"),
   message: document.querySelector("#message"),
   start: document.querySelector("#start"),
-  music: document.querySelector("#music")
+  music: document.querySelector("#music"),
+  missionBrowser: document.querySelector("#missionBrowser"),
+  missionBrowserButton: document.querySelector("#missionBrowserButton"),
+  closeMissionBrowser: document.querySelector("#closeMissionBrowser"),
+  missionCards: document.querySelector("#missionCards"),
+  previousMission: document.querySelector("#previousMission"),
+  nextMission: document.querySelector("#nextMission")
 };
 const WIDTH = canvas.width;
 const HEIGHT = canvas.height;
 const targets = [];
 const particles = [];
 const audio = new AmbientAudio();
+const missionPreviews = new Map();
+const initialProgress = loadProgress();
 const coffeeQuips = [
   "Caffeine secured. Your hands are union-approved!",
   "Excellent temperature discrimination!",
@@ -51,24 +61,35 @@ const coffeeQuips = [
 const state = {
   mode: "ready",
   selectedIndex: 0,
-  mission: createMission(0, 0, 101),
-  progress: loadProgress(),
+  mission: createMission(0, initialProgress.careerPoints, 101),
+  progress: initialProgress,
   score: 0,
   incidents: 0,
   timeLeft: 65,
-  task: { coffee: 0, water: 0, phone: 0, reports: 0 },
+  task: { coffee: 0, water: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 },
   spawnClock: 0,
   lastFrame: 0,
   messageClock: 0,
   shake: 0,
-  fernWetUntil: 0
+  fernWetUntil: 0,
+  sortingItemSelected: false,
+  pestClock: 0
 };
 
 function loadProgress() {
-  const stored = localStorage.getItem(PROGRESS_STORAGE_KEY);
+  const current = localStorage.getItem(PROGRESS_STORAGE_KEY);
+  const stored = current ?? localStorage.getItem(LEGACY_PROGRESS_STORAGE_KEY);
   if (!stored) return createEmptyProgress();
   try {
-    return sanitizeProgress(JSON.parse(stored));
+    const parsed = JSON.parse(stored);
+    if (current) return sanitizeProgress(parsed);
+    const migrated = migrateLegacyProgress(parsed);
+    try {
+      localStorage.setItem(PROGRESS_STORAGE_KEY, JSON.stringify(migrated));
+    } catch (error) {
+      console.error("Could not save migrated Office Mayhem progress.", error);
+    }
+    return migrated;
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
     console.warn("Saved Office Mayhem progress was invalid; starting a clean campaign.", error);
@@ -77,7 +98,7 @@ function loadProgress() {
 }
 
 function saveProgress(completed) {
-  const next = recordMissionResult(state.progress, state.mission.index, state.score, completed);
+  const next = recordMissionResult(state.progress, state.mission.index, state.score, completed, state.incidents);
   state.progress = next;
   let saved = true;
   try {
@@ -101,33 +122,80 @@ function setMessage(text, seconds = 2.3) {
 
 function formatTaskHint() {
   const { mission, task } = state;
-  const side = mission.taskKind === "phone"
-    ? `Silence ringing phones (${task.phone}/${mission.taskGoal})`
-    : `File yellow reports (${task.reports}/${mission.taskGoal})`;
-  return `Water the fern (${task.water}/${mission.waterGoal}) · ${side}`;
+  const count = task[mission.taskKind] ?? 0;
+  let detail = `${TASK_LABELS[mission.taskKind]} (${count}/${mission.taskGoal})`;
+  if (mission.taskKind === "sorting" && count < mission.taskGoal) {
+    detail += ` · Next tray: ${["red", "blue", "gold"][mission.sortingSequence[count]]}`;
+  }
+  return `Tap the fern (${task.water}/${mission.waterGoal}) · ${detail} · Commendation: zero incidents`;
 }
 
 function updateMissionPicker() {
-  const unlockedCount = getUnlockedMissionCount(state.progress.careerPoints);
-  nodes.missionSelect.replaceChildren();
-  for (let index = 0; index < MISSION_COUNT; index++) {
-    const threshold = UNLOCK_THRESHOLDS[index];
-    const option = document.createElement("option");
-    option.value = String(index);
-    option.disabled = index >= unlockedCount;
-    option.textContent = index < unlockedCount
-      ? `Mission ${index + 1} · Best ${state.progress.bestScores[index]}`
-      : `Mission ${index + 1} · Locked (${threshold} career points)`;
-    nodes.missionSelect.append(option);
-  }
-  if (state.selectedIndex >= unlockedCount) state.selectedIndex = 0;
-  nodes.missionSelect.value = String(state.selectedIndex);
+  refreshMissionPreviews();
   updateMissionDescription();
+  updateMissionCards();
+}
+
+function refreshMissionPreviews() {
+  missionPreviews.clear();
+  for (let index = 0; index < MISSION_COUNT; index++) {
+    const mission = index === state.selectedIndex
+      ? state.mission
+      : createMission(index, state.progress.careerPoints, crypto.getRandomValues(new Uint32Array(1))[0]);
+    missionPreviews.set(index, mission);
+  }
+}
+
+function taskDescription(mission) {
+  return `${mission.coffeeGoal} hot coffees · tap fern · ${TASK_LABELS[mission.taskKind]}`;
+}
+
+function updateMissionCards() {
+  nodes.missionCards.replaceChildren();
+  const unlocked = new Set(getUnlockedMissionIndices(state.progress));
+  for (let index = 0; index < MISSION_COUNT; index++) {
+    const mission = missionPreviews.get(index) ?? createMission(index, state.progress.careerPoints, index + 101);
+    const card = document.createElement("button");
+    card.className = "mission-card";
+    card.type = "button";
+    card.disabled = !unlocked.has(index);
+    card.setAttribute("aria-current", String(index === state.selectedIndex));
+    const number = document.createElement("span");
+    number.className = "mission-card-number";
+    number.textContent = `Mission ${index + 1}`;
+    const title = document.createElement("span");
+    title.className = "mission-card-title";
+    title.textContent = mission.title;
+    const task = document.createElement("span");
+    task.className = "mission-card-task";
+    task.textContent = taskDescription(mission);
+    const metadata = document.createElement("span");
+    metadata.className = "mission-card-meta";
+    metadata.textContent = unlocked.has(index)
+      ? `${mission.durationSeconds}s · Best ${state.progress.bestScores[index]}`
+      : `Locked · Complete mission ${index}`;
+    card.append(number, title, task, metadata);
+    const status = document.createElement("span");
+    status.className = "mission-card-status";
+    if (state.progress.completedMissions.includes(index)) {
+      status.textContent = state.progress.perfectMissions.includes(index) ? "Complete · Zero-incident badge" : "Complete · Replay";
+    } else if (!unlocked.has(index)) {
+      status.textContent = "Complete the previous mission to unlock";
+    } else {
+      status.textContent = "Available · Earn a zero-incident badge";
+    }
+    card.append(status);
+    card.addEventListener("click", () => {
+      selectMission(index, mission);
+      nodes.missionBrowser.close();
+      setMessage(`Mission ${index + 1} selected. Zero incidents earns a commendation.`, 3);
+    });
+    nodes.missionCards.append(card);
+  }
 }
 
 function updateMissionDescription() {
-  const preview = state.mission;
-  nodes.missionHint.textContent = `${preview.durationSeconds}s · ${preview.coffeeGoal} hot coffees · ${preview.taskKind === "phone" ? "phone triage" : "report filing"} · tier ${preview.difficultyTier + 1}`;
+  nodes.taskCopy.textContent = taskDescription(state.mission);
 }
 
 function updateHud() {
@@ -138,36 +206,44 @@ function updateHud() {
   nodes.time.classList.toggle("time-low", state.mode === "running" && state.timeLeft <= 10);
   nodes.incidents.textContent = String(state.incidents);
   nodes.level.textContent = `${mission.index + 1}/${MISSION_COUNT}`;
-  nodes.missionSelect.disabled = state.mode === "running";
   nodes.missionTitle.textContent = `Mission ${mission.index + 1} · ${mission.title}`;
-  nodes.taskCopy.textContent = `Catch ${mission.coffeeGoal} hot coffees`;
   nodes.progressTrack.setAttribute("aria-valuemax", String(mission.coffeeGoal));
   nodes.progressTrack.setAttribute("aria-valuenow", String(task.coffee));
   nodes.progress.style.width = `${Math.min(100, task.coffee / mission.coffeeGoal * 100)}%`;
   nodes.taskDetail.textContent = formatTaskHint();
-  nodes.water.hidden = state.mode !== "running" || task.water >= mission.waterGoal;
-  nodes.water.textContent = `Water fern · ${task.water}/${mission.waterGoal}`;
+  const resultVisible = state.mode === "missionComplete" || state.mode === "campaignComplete" ||
+    state.mode === "failed" || state.mode === "browsing";
+  const unlocked = getUnlockedMissionIndices(state.progress);
+  nodes.previousMission.hidden = !resultVisible;
+  nodes.nextMission.hidden = !resultVisible;
+  nodes.previousMission.disabled = !unlocked.some(index => index < state.selectedIndex);
+  nodes.nextMission.disabled = !unlocked.some(index => index > state.selectedIndex);
+  nodes.missionBrowserButton.disabled = state.mode === "running";
 }
 
-function selectMission(index) {
-  const unlockedCount = getUnlockedMissionCount(state.progress.careerPoints);
-  if (!Number.isInteger(index) || index < 0 || index >= unlockedCount) return;
+function selectMission(index, preview = missionPreviews.get(index)) {
+  if (!Number.isInteger(index) || !isMissionUnlocked(index, state.progress)) return;
+  if (!preview) {
+    preview = createMission(index, state.progress.careerPoints, crypto.getRandomValues(new Uint32Array(1))[0]);
+    missionPreviews.set(index, preview);
+  }
   state.selectedIndex = index;
-  state.mission = createMission(index, state.progress.careerPoints, crypto.getRandomValues(new Uint32Array(1))[0]);
+  state.mission = preview;
+  state.mode = "ready";
+  nodes.start.textContent = "Start mission";
   updateMissionDescription();
+  updateMissionCards();
   updateHud();
 }
 
 function startMission() {
-  const requestedIndex = Number(nodes.missionSelect.value);
-  if (requestedIndex !== state.selectedIndex) selectMission(requestedIndex);
-  state.mission = createMission(state.selectedIndex, state.progress.careerPoints, crypto.getRandomValues(new Uint32Array(1))[0]);
-  updateMissionDescription();
   state.score = 0;
   state.incidents = 0;
   state.timeLeft = state.mission.durationSeconds;
-  state.task = { coffee: 0, water: 0, phone: 0, reports: 0 };
+  state.task = { coffee: 0, water: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 };
   state.spawnClock = 0;
+  state.pestClock = 0;
+  state.sortingItemSelected = false;
   state.fernWetUntil = 0;
   targets.length = 0;
   particles.length = 0;
@@ -188,7 +264,8 @@ function persistAndFinish(completed) {
   if (state.mode === "campaignComplete") {
     setMessage(`Campaign complete! You are Chief of Everything. The fern gets your office.${saved ? "" : " Progress could not be saved."}`, 99);
   } else if (state.mode === "missionComplete") {
-    setMessage(`Mission complete! Pick any unlocked mission or keep earning points.${saved ? "" : " Progress could not be saved."}`, 99);
+    const earnedBadge = state.progress.perfectMissions.includes(state.mission.index);
+    setMessage(`Mission complete! ${earnedBadge ? "Zero-incident commendation earned." : "Try again without incidents for a commendation."}${saved ? "" : " Progress could not be saved."}`, 99);
   } else {
     setMessage(`Shift over. The phone is still ringing, but at least the fern is hydrated.${saved ? "" : " Progress could not be saved."}`, 99);
   }
@@ -227,13 +304,12 @@ function spawnTarget(now) {
   const golden = kind === "hot" && Math.random() < .13;
   const radius = kind === "phone" ? 24 : kind === "report" ? 27 : golden ? 28 : randomBetween(22, 30);
   const angle = randomBetween(0, Math.PI * 2);
-  const bonusMultiplier = golden || kind === "report" || kind === "phone"
-    ? mission.bonusSpeedMultiplier
-    : 1;
-  const speed = randomBetween(70, 110) * mission.speedMultiplier * bonusMultiplier;
+  const speed = getTargetSpeed(randomBetween(70, 110), mission, kind, golden);
+  const x = randomBetween(radius + 15, WIDTH - radius - 15);
+  const y = randomBetween(166 + radius, 378 - radius);
   targets.push({
-    x: randomBetween(radius + 15, WIDTH - radius - 15),
-    y: randomBetween(166 + radius, 378 - radius),
+    x,
+    y,
     r: radius,
     vx: Math.cos(angle) * speed,
     vy: Math.sin(angle) * speed,
@@ -242,6 +318,25 @@ function spawnTarget(now) {
     hue: Math.floor(randomBetween(0, 360)),
     kind,
     golden
+  });
+}
+
+function spawnPest(now) {
+  const x = WIDTH - 35;
+  const y = randomBetween(210, 330);
+  const dx = 690 - x;
+  const dy = 365 - y;
+  const length = Math.hypot(dx, dy) || 1;
+  const speed = 85 * state.mission.speedMultiplier;
+  targets.push({
+    x, y, r: 18,
+    vx: dx / length * speed,
+    vy: dy / length * speed,
+    wobble: randomBetween(0, Math.PI * 2),
+    born: now,
+    hue: 0,
+    kind: "bug",
+    golden: false
   });
 }
 
@@ -297,6 +392,7 @@ function drawBackground(now) {
     ctx.fill();
     ctx.restore();
   }
+  drawActivityStations(now);
   ctx.fillStyle = "#534536";
   ctx.font = "bold 15px Trebuchet MS, sans-serif";
   ctx.fillText("Q3 GOALS", 62, 212);
@@ -320,6 +416,72 @@ function drawBackground(now) {
   ctx.fillStyle = "#f7f4e9dd";
   ctx.font = "bold 13px Trebuchet MS, sans-serif";
   ctx.fillText(state.mode === "running" ? "BREAK ROOM INCIDENT IN PROGRESS" : "BREAK ROOM · 9:01 AM", 351, 34);
+}
+
+function drawActivityStations(now) {
+  if (state.mission.taskKind === "printer") {
+    ctx.fillStyle = "#26363a";
+    ctx.beginPath();
+    ctx.roundRect(760, 215, 142, 98, 10);
+    ctx.fill();
+    ctx.fillStyle = "#91a19c";
+    ctx.fillRect(776, 231, 110, 17);
+    ctx.fillStyle = "#e6ddc5";
+    ctx.fillRect(788, 235, 88, 9);
+    ctx.fillStyle = "#607476";
+    ctx.fillRect(773, 270, 116, 28);
+    ctx.fillStyle = "#172127";
+    ctx.fillRect(781, 276, 100, 13);
+    ctx.fillStyle = "#f5f0dd";
+    ctx.font = "bold 11px Trebuchet MS, sans-serif";
+    ctx.fillText("PAPER JAM", 804, 286);
+    const parts = [[790, 259], [835, 259], [880, 259]];
+    parts.forEach(([x, y], index) => {
+      const active = index === state.task.printer;
+      ctx.beginPath();
+      ctx.arc(x, y, active ? 13 + Math.sin(now / 180) * 2 : 11, 0, Math.PI * 2);
+      ctx.fillStyle = active ? "#ffd84d" : index < state.task.printer ? "#86dfa3" : "#71817c";
+      ctx.fill();
+      ctx.fillStyle = "#172127";
+      ctx.font = "900 12px Trebuchet MS, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(String(index + 1), x, y + 4);
+      ctx.textAlign = "start";
+    });
+    ctx.fillStyle = "#f7f4e9";
+    ctx.font = "bold 11px Trebuchet MS, sans-serif";
+    ctx.fillText("TAP LIGHTS IN ORDER", 772, 326);
+  } else if (state.mission.taskKind === "sorting") {
+    const colors = ["#db6c5f", "#63b4dc", "#e2ba47"];
+    const names = ["RED", "BLUE", "GOLD"];
+    const trayX = [390, 480, 570];
+    trayX.forEach((x, index) => {
+      ctx.fillStyle = "#203137";
+      ctx.beginPath();
+      ctx.roundRect(x - 37, 430, 74, 68, 7);
+      ctx.fill();
+      ctx.fillStyle = colors[index];
+      ctx.fillRect(x - 30, 438, 60, 14);
+      ctx.fillStyle = "#f7f4e9";
+      ctx.font = "bold 12px Trebuchet MS, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(names[index], x, 477);
+      ctx.textAlign = "start";
+    });
+    const tray = state.mission.sortingSequence[state.task.sorting] ?? 0;
+    ctx.fillStyle = "#f0e7cf";
+    ctx.beginPath();
+    ctx.roundRect(449, 345, 62, 65, 4);
+    ctx.fill();
+    ctx.fillStyle = colors[tray];
+    ctx.fillRect(456, 353, 48, 8);
+    ctx.fillStyle = "#29393b";
+    ctx.font = "bold 10px Trebuchet MS, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("URGENT", 480, 378);
+    ctx.fillText(state.sortingItemSelected ? "DROP IN TRAY" : "TAP TO PICK UP", 480, 394);
+    ctx.textAlign = "start";
+  }
 }
 
 function drawCoffee(target, now) {
@@ -466,6 +628,37 @@ function drawPhone(target, now) {
   ctx.restore();
 }
 
+function drawPest(target, now) {
+  const wobble = Math.sin(now / 75 + target.wobble) * 3;
+  ctx.save();
+  ctx.translate(target.x, target.y + wobble);
+  ctx.fillStyle = "#9a542f";
+  ctx.beginPath();
+  ctx.ellipse(0, 1, target.r * .8, target.r * .55, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#4b3428";
+  ctx.lineWidth = 3;
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * 5, 5);
+    ctx.lineTo(side * 18, 13);
+    ctx.moveTo(side * 4, -2);
+    ctx.lineTo(side * 15, -9);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "#ffe6aa";
+  ctx.beginPath();
+  ctx.arc(-5, -2, 3, 0, Math.PI * 2);
+  ctx.arc(5, -2, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#30251e";
+  ctx.beginPath();
+  ctx.arc(-5, -2, 1.5, 0, Math.PI * 2);
+  ctx.arc(5, -2, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawParticles(dt) {
   for (let index = particles.length - 1; index >= 0; index--) {
     const particle = particles[index];
@@ -491,15 +684,15 @@ function drawOverlay() {
   ctx.fillStyle = "#18272dce";
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
   ctx.textAlign = "center";
-  if (state.mode === "ready") {
+  if (state.mode === "ready" || state.mode === "browsing") {
     ctx.fillStyle = "#fff8e9";
     ctx.font = "900 38px Trebuchet MS, sans-serif";
     ctx.fillText("THE OFFICE HAS TOO MANY NOTIFICATIONS", WIDTH / 2, 228);
     ctx.fillStyle = "#dbe8d9";
     ctx.font = "20px Trebuchet MS, sans-serif";
-    ctx.fillText("Catch hot coffee. Water the fern. Silence the phone.", WIDTH / 2, 270);
+    ctx.fillText("Finish every task. Avoid incidents to earn a commendation.", WIDTH / 2, 270);
     ctx.font = "16px Trebuchet MS, sans-serif";
-    ctx.fillText("Select a mission, then earn points to unlock tougher shifts.", WIDTH / 2, 302);
+    ctx.fillText("The mission board shows objectives and unlocks.", WIDTH / 2, 302);
   } else {
     ctx.fillStyle = "#fff8e9";
     ctx.font = "900 44px Trebuchet MS, sans-serif";
@@ -514,7 +707,7 @@ function drawOverlay() {
     const review = state.mode === "campaignComplete"
       ? "The fern is now your manager."
       : state.mode === "missionComplete"
-        ? `${state.progress.careerPoints} career points · more missions may be unlocked`
+        ? "Next mission unlocked · zero incidents earns a commendation"
         : "The phone is still ringing. You can try again.";
     ctx.fillText(review, WIDTH / 2, 302);
   }
@@ -531,6 +724,7 @@ function render(now, dt) {
   for (const target of targets) {
     if (target.kind === "report") drawReport(target, now);
     else if (target.kind === "phone") drawPhone(target, now);
+    else if (target.kind === "bug") drawPest(target, now);
     else drawCoffee(target, now);
   }
   drawParticles(dt);
@@ -562,6 +756,13 @@ function update(dt, now) {
     spawnTarget(now);
     state.spawnClock = state.mission.spawnInterval;
   }
+  if (state.mission.taskKind === "pests" && state.task.pests < state.mission.taskGoal) {
+    state.pestClock -= dt;
+    if (state.pestClock <= 0 && targets.length < state.mission.maxTargets + 1) {
+      spawnPest(now);
+      state.pestClock = 2.5;
+    }
+  }
   for (let index = targets.length - 1; index >= 0; index--) {
     const target = targets[index];
     target.x += target.vx * dt;
@@ -571,7 +772,7 @@ function update(dt, now) {
     if (target.x > WIDTH - margin) { target.x = WIDTH - margin; target.vx = -Math.abs(target.vx); }
     if (target.y < 151 + target.r) { target.y = 151 + target.r; target.vy = Math.abs(target.vy); }
     if (target.y > 382 - target.r) { target.y = 382 - target.r; target.vy = -Math.abs(target.vy); }
-    if (now - target.born > (target.kind === "phone" ? 5000 : 8500)) {
+    if (now - target.born > (target.kind === "phone" || target.kind === "bug" ? 5000 : 8500)) {
       targets.splice(index, 1);
       const penalty = applyTargetExpiry(target.kind, state.mission);
       state.incidents += penalty.incidents;
@@ -603,6 +804,9 @@ function hitTarget(target) {
   } else if (target.kind === "report") {
     audio.play(880, .16, "sine", .03);
     setMessage("Yellow report filed! Finance has acknowledged receipt.", 2.2);
+  } else if (target.kind === "bug") {
+    audio.play(392, .18, "triangle", .04);
+    setMessage("Pest tapped! The fern has requested a tiny security detail.", 2.2);
   } else {
     audio.play(target.golden ? 1046.5 : 740, .16, "sine", .025);
     for (let index = 0; index < 8; index++) {
@@ -631,6 +835,55 @@ function canvasPoint(event) {
   };
 }
 
+function tapPrinterPart(point) {
+  if (state.mission.taskKind !== "printer" || state.task.printer >= state.mission.taskGoal) return false;
+  const parts = [[790, 259], [835, 259], [880, 259]];
+  const clicked = parts.findIndex(([x, y]) => (point.x - x) ** 2 + (point.y - y) ** 2 <= 22 ** 2);
+  if (clicked < 0) return false;
+  if (clicked === state.task.printer) {
+    state.task.printer++;
+    state.score += 2;
+    audio.play(523.25, .16, "sine", .03);
+    setMessage("Printer part cleared. The paper jam has been formally warned.", 2);
+  } else {
+    state.incidents++;
+    state.timeLeft = Math.max(0, state.timeLeft - 2);
+    setMessage("Wrong printer part! Follow the blinking lights in order.", 2.2);
+  }
+  updateHud();
+  tryCompleteMission();
+  return true;
+}
+
+function tapSortingStation(point) {
+  if (state.mission.taskKind !== "sorting" || state.task.sorting >= state.mission.taskGoal) return false;
+  if (point.x >= 449 && point.x <= 511 && point.y >= 345 && point.y <= 410) {
+    state.sortingItemSelected = true;
+    setMessage("Document picked up. Match its color to a tray.", 1.8);
+    return true;
+  }
+  const trays = [[353, 427, 427, 505], [443, 427, 517, 505], [533, 427, 607, 505]];
+  const clicked = trays.findIndex(([left, top, right, bottom]) =>
+    point.x >= left && point.x <= right && point.y >= top && point.y <= bottom);
+  if (clicked < 0) return false;
+  if (!state.sortingItemSelected) {
+    setMessage("Pick up the urgent document first.", 1.8);
+  } else if (clicked === state.mission.sortingSequence[state.task.sorting]) {
+    state.task.sorting++;
+    state.sortingItemSelected = false;
+    state.score += 2;
+    audio.play(659.25, .16, "sine", .03);
+    setMessage("Correct tray! The filing cabinet is briefly impressed.", 2);
+    tryCompleteMission();
+  } else {
+    state.incidents++;
+    state.score = Math.max(0, state.score - 1);
+    setMessage("Wrong tray. The document has filed a complaint.", 2);
+  }
+  updateHud();
+  return true;
+}
+
 canvas.addEventListener("pointerdown", event => {
   if (state.mode !== "running") return;
   event.preventDefault();
@@ -640,6 +893,7 @@ canvas.addEventListener("pointerdown", event => {
     waterFern();
     return;
   }
+  if (tapPrinterPart(point) || tapSortingStation(point)) return;
   for (let index = targets.length - 1; index >= 0; index--) {
     const target = targets[index];
     const dx = point.x - target.x;
@@ -652,10 +906,26 @@ canvas.addEventListener("pointerdown", event => {
   }
 });
 
-nodes.water.addEventListener("click", waterFern);
-nodes.missionSelect.addEventListener("change", () => {
-  selectMission(Number(nodes.missionSelect.value));
-});
+function openMissionBrowser() {
+  if (state.mode === "running") return;
+  updateMissionCards();
+  nodes.missionBrowser.showModal();
+}
+
+function moveMission(direction) {
+  const target = getAdjacentMissionIndex(state.selectedIndex, direction, state.progress);
+  if (target === undefined) return;
+  selectMission(target);
+  state.mode = "browsing";
+  nodes.start.textContent = "Start mission";
+  setMessage(`Mission ${target + 1} selected. Open Missions to see all objectives.`, 3);
+  updateHud();
+}
+
+nodes.missionBrowserButton.addEventListener("click", openMissionBrowser);
+nodes.closeMissionBrowser.addEventListener("click", () => nodes.missionBrowser.close());
+nodes.previousMission.addEventListener("click", () => moveMission(-1));
+nodes.nextMission.addEventListener("click", () => moveMission(1));
 nodes.start.addEventListener("click", startMission);
 nodes.music.addEventListener("click", async () => {
   try {
@@ -686,6 +956,7 @@ function loop(now) {
 
 updateMissionPicker();
 updateHud();
+nodes.missionBrowser.showModal();
 requestAnimationFrame(now => {
   state.lastFrame = now;
   loop(now);
