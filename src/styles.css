@@ -167,6 +167,10 @@ h1 span { color: var(--orange); }
   font-size: .7rem;
   line-height: 1.3;
 }
+.plant-request-status[data-requesting="true"] {
+  color: var(--orange);
+  font-weight: 800;
+}
 .task-detail {
   margin: auto 0 0;
   color: var(--muted);
@@ -344,7 +348,7 @@ button:disabled { cursor: not-allowed; opacity: .55; filter: grayscale(.4); }
   .gameplay-layout { grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 6px; }
   .mission-progress { padding: 7px; }
   .mission-progress-title { margin: 0 0 5px; font-size: .62rem; }
-  .objective-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+  .objective-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
   .objective-item { grid-template-columns: 15px minmax(0, 1fr); gap: 2px 4px; padding: 5px; }
   .objective-status { font-size: .85rem; }
   .objective-name { font-size: .64rem; }

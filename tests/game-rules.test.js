@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   MISSION_COUNT,
   TASKS,
+  applyPlantRequestExpiry,
   applyTargetExpiry,
   applyTargetHit,
   clampMissionTime,
@@ -67,7 +68,6 @@ test("later missions are measurably faster and more demanding than early mission
   assert.ok(hard.speedMultiplier > easy.speedMultiplier);
   assert.ok(hard.spawnInterval < easy.spawnInterval);
   assert.ok(hard.bonusSpeedMultiplier > hard.speedMultiplier);
-  assert.equal(easy.waterGoal, 1);
   for (const kind of ["hot", "phone", "report"]) {
     assert.ok(getTargetSpeed(100, hard, kind) > getTargetSpeed(100, easy, kind));
   }
@@ -169,12 +169,15 @@ test("ignoring phones and pests incurs penalties while harder missions penalize 
   assert.equal(applyTargetExpiry("hot", easy).incidents, 1);
 });
 
-test("a mission requires coffee, watering, and its selected activity", () => {
+test("missed plant requests cost points, time, and an incident", () => {
+  assert.deepEqual(applyPlantRequestExpiry(), { points: -2, timeDelta: -2, incidents: 1 });
+});
+
+test("a mission requires coffee and its selected activity, not plant watering", () => {
   for (const missionIndex of [0, 6, 7, 8]) {
     const mission = createMission(missionIndex, 20, 77);
-    const progress = { coffee: mission.coffeeGoal, water: mission.waterGoal, [mission.taskKind]: mission.taskGoal };
+    const progress = { coffee: mission.coffeeGoal, [mission.taskKind]: mission.taskGoal };
     assert.equal(isMissionComplete(mission, progress), true);
-    assert.equal(isMissionComplete(mission, { ...progress, water: mission.waterGoal - 1 }), false);
     assert.equal(isMissionComplete(mission, { ...progress, [mission.taskKind]: mission.taskGoal - 1 }), false);
   }
 });

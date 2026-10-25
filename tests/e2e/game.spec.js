@@ -28,6 +28,19 @@ async function tapCanvas(page, x, y) {
   await page.mouse.click(bounds.x + bounds.width * x / 960, bounds.y + bounds.height * y / 540);
 }
 
+async function tapRequestedPlant(page, touch = false) {
+  const plant = await page.locator("#plantRequestStatus").evaluate(node => ({
+    x: Number(node.dataset.requestingX),
+    y: Number(node.dataset.requestingY)
+  }));
+  const canvas = await page.locator("#game").boundingBox();
+  if (touch) {
+    await page.touchscreen.tap(canvas.x + canvas.width * plant.x / 960, canvas.y + canvas.height * plant.y / 540);
+  } else {
+    await page.mouse.click(canvas.x + canvas.width * plant.x / 960, canvas.y + canvas.height * plant.y / 540);
+  }
+}
+
 async function unlockThrough(page, lastMissionIndex) {
   await page.addInitScript(index => {
     localStorage.setItem("office-mayhem-campaign-v2", JSON.stringify({
@@ -66,17 +79,47 @@ test("mission board shows nine square cards and the preview matches the selected
   await expect(page.locator("#taskCopy")).toHaveText(taskPreview);
 });
 
-test("the fern requests water before watering counts toward the mission", async ({ page }) => {
+test("watering plants is optional for mission progress but rewards answering a request", async ({ page }) => {
   await chooseMission(page, 0);
   await page.getByRole("button", { name: "Start mission" }).click();
   await tapCanvas(page, 691, 365);
-  await expect(page.locator("#waterProgress")).toContainText("Waiting · 0/1");
-  await expect(page.locator("#waterObjective")).toHaveAttribute("data-requesting", "true", { timeout: 7000 });
-  await expect(page.locator("#plantRequestStatus")).toContainText("needs water");
-  await tapCanvas(page, 691, 365);
-  await expect(page.locator("#waterObjective")).toHaveAttribute("data-complete", "true");
-  await expect(page.locator("#waterProgress")).toHaveText("1/1");
-  await expect(page.locator("#plantRequestStatus")).toContainText("Fern watered");
+  await expect(page.locator("#plantRequestStatus")).not.toContainText("watered");
+  await expect(page.locator("#plantRequestStatus")).toContainText("needs water", { timeout: 7000 });
+  await tapRequestedPlant(page);
+  await expect(page.locator("#plantRequestStatus")).toContainText("watered");
+  await expect(page.locator(".objective-item")).toHaveCount(2);
+  await expect(page.locator('[data-objective="water"]')).toHaveCount(0);
+});
+
+test("different generated flowers can ask for water in turn", async ({ page }) => {
+  await chooseMission(page, 0);
+  await page.evaluate(() => {
+    crypto.getRandomValues = array => {
+      array[0] = 121;
+      return array;
+    };
+  });
+  await page.getByRole("button", { name: "Start mission" }).click();
+  const status = page.locator("#plantRequestStatus");
+  await expect(status).toHaveAttribute("data-requesting-plant", "fern", { timeout: 7000 });
+  await tapRequestedPlant(page);
+  await expect(status).toHaveAttribute("data-requesting-plant", "daisy", { timeout: 7000 });
+  await tapRequestedPlant(page);
+  await expect(status).toContainText("daisy is watered");
+});
+
+test("ignoring a timed plant request costs points and adds an incident", async ({ page }) => {
+  await chooseMission(page, 0);
+  await page.evaluate(() => {
+    Math.random = () => .3;
+    let elapsed = performance.now();
+    window.requestAnimationFrame = callback => window.setTimeout(() => callback(elapsed += 40), 0);
+  });
+  await page.getByRole("button", { name: "Start mission" }).click();
+  await expect(page.locator("#plantRequestStatus")).toContainText("needs water", { timeout: 7000 });
+  await expect(page.locator("#incidents")).toHaveText("1", { timeout: 7000 });
+  await expect(page.locator("#plantRequestStatus")).toContainText("unwatered");
+  await expect(page.locator("#score")).toHaveText("00");
 });
 
 test("mission starts reroll the locally generated office, plants, and weather", async ({ page }) => {
@@ -123,6 +166,12 @@ test("printer repair requires tapping its indicated parts in sequence", async ({
 test("paper sorting requires picking up each document and matching its tray", async ({ page }) => {
   await unlockThrough(page, 8);
   await chooseMission(page, 7);
+  await page.evaluate(() => {
+    crypto.getRandomValues = array => {
+      array[0] = 1;
+      return array;
+    };
+  });
   await page.getByRole("button", { name: "Start mission" }).click();
   await tapCanvas(page, 691, 365);
   const trayX = { red: 390, blue: 480, gold: 570 };
@@ -130,7 +179,7 @@ test("paper sorting requires picking up each document and matching its tray", as
     const hint = await page.locator("#taskDetail").textContent();
     const color = hint.match(/Next tray: (red|blue|gold)/)?.[1];
     expect(color).toBeTruthy();
-    await tapCanvas(page, 480, 377);
+    await tapCanvas(page, 460, 377);
     await tapCanvas(page, trayX[color], 465);
   }
   await expect(page.locator("#activityProgress")).toHaveText("3/3");
@@ -218,7 +267,7 @@ test("ended shifts show previous and next controls beside retry", async ({ page 
   await expect(page.locator("#level")).toHaveText("3/9");
 });
 
-test("selecting another mission clears the previous mission's objective checks", async ({ page }) => {
+test("selecting another mission resets run progress without plant checklist objectives", async ({ page }) => {
   test.setTimeout(45_000);
   await unlockThrough(page, 2);
   await chooseMission(page, 0);
@@ -227,15 +276,13 @@ test("selecting another mission clears the previous mission's objective checks",
     window.requestAnimationFrame = callback => window.setTimeout(() => callback(elapsed += 40), 0);
   });
   await page.getByRole("button", { name: "Start mission" }).click();
-  await expect(page.locator("#waterObjective")).toHaveAttribute("data-requesting", "true", { timeout: 7000 });
-  await tapCanvas(page, 691, 365);
-  await expect(page.locator("#waterObjective")).toHaveAttribute("data-complete", "true");
+  await expect(page.locator("#plantRequestStatus")).toContainText("needs water", { timeout: 7000 });
   await expect(page.locator("#message")).toContainText("Shift over", { timeout: 30_000 });
   await page.getByRole("button", { name: "Next mission" }).click();
   await expect(page.locator("#level")).toHaveText("2/9");
-  await expect(page.locator("#waterProgress")).toHaveText("Waiting · 0/1");
-  await expect(page.locator("#waterObjective")).toHaveAttribute("data-complete", "false");
   await expect(page.locator("#coffeeProgress")).toHaveText(/0\/\d+/);
+  await expect(page.locator("#plantRequestStatus")).toHaveText("The plants are resting.");
+  await expect(page.locator('[data-objective="water"]')).toHaveCount(0);
 });
 
 test("portrait and rotated landscape keep the canvas and controls within the viewport", async ({ page }) => {
@@ -273,17 +320,15 @@ test("portrait and rotated landscape keep the canvas and controls within the vie
   expect(landscape.start.bottom).toBeLessThanOrEqual(landscape.viewportHeight + 1);
   expect(landscape.missionBrowser.right).toBeLessThanOrEqual(landscape.viewport + 1);
   expect(landscape.progress.bottom).toBeLessThanOrEqual(landscape.viewportHeight + 1);
-  await expect(page.locator(".objective-item")).toHaveCount(3);
+  await expect(page.locator(".objective-item")).toHaveCount(2);
 });
 
-test("mobile touch can start a shift and water the fern when it requests", async ({ page }, testInfo) => {
+test("mobile touch can water a plant when it requests", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile-chromium", "Touch input is exercised in the mobile browser project.");
   await chooseMission(page, 0);
   const start = await page.getByRole("button", { name: "Start mission" }).boundingBox();
   await page.touchscreen.tap(start.x + start.width / 2, start.y + start.height / 2);
-  await expect(page.locator("#waterObjective")).toHaveAttribute("data-requesting", "true", { timeout: 7000 });
-  await page.locator("#game").scrollIntoViewIfNeeded();
-  const canvas = await page.locator("#game").boundingBox();
-  await page.touchscreen.tap(canvas.x + canvas.width * 691 / 960, canvas.y + canvas.height * 365 / 540);
-  await expect(page.locator("#waterProgress")).toHaveText("1/1");
+  await expect(page.locator("#plantRequestStatus")).toContainText("needs water", { timeout: 7000 });
+  await tapRequestedPlant(page, true);
+  await expect(page.locator("#plantRequestStatus")).toContainText("watered");
 });

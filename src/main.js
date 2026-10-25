@@ -5,6 +5,7 @@ import {
   PROGRESS_STORAGE_KEY,
   LEGACY_PROGRESS_STORAGE_KEY,
   TASK_LABELS,
+  applyPlantRequestExpiry,
   applyTargetExpiry,
   applyTargetHit,
   clampMissionTime,
@@ -36,9 +37,6 @@ const nodes = {
   coffeeObjective: document.querySelector("#coffeeObjective"),
   coffeeStatus: document.querySelector("#coffeeStatus"),
   coffeeProgress: document.querySelector("#coffeeProgress"),
-  waterObjective: document.querySelector("#waterObjective"),
-  waterStatus: document.querySelector("#waterStatus"),
-  waterProgress: document.querySelector("#waterProgress"),
   activityObjective: document.querySelector("#activityObjective"),
   activityStatus: document.querySelector("#activityStatus"),
   activityName: document.querySelector("#activityName"),
@@ -88,16 +86,19 @@ const state = {
   score: 0,
   incidents: 0,
   timeLeft: 65,
-  task: { coffee: 0, water: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 },
+  task: { coffee: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 },
   spawnClock: 0,
   nonHotSpawnStreak: 0,
   coldlessSpawnStreak: 0,
-  waterRequestClock: 0,
-  fernRequesting: false,
+  plantRequestClock: 0,
+  plantRequestRemaining: 0,
+  plantRequestOrder: [],
+  plantRequestIndex: 0,
+  requestedPlantId: null,
   lastFrame: 0,
   messageClock: 0,
   shake: 0,
-  fernWetUntil: 0,
+  wetPlants: new Map(),
   sortingItemSelected: false,
   pestClock: 0
 };
@@ -153,9 +154,38 @@ function updateCanvasDescription() {
     `Office: ${scene.office.name}; ${scene.timeOfDay}, ${scene.weather}; ${scene.plants.length} plants and flowers.`);
 }
 
+function getPlantName(kind) {
+  return ({
+    fern: "fern",
+    cactus: "cactus",
+    succulent: "succulent",
+    daisy: "daisy",
+    tulip: "tulip",
+    sunflower: "sunflower"
+  })[kind] ?? "plant";
+}
+
+function setPlantRequestStatus(text, plant = null) {
+  const node = nodes.plantRequestStatus;
+  node.textContent = text;
+  node.dataset.requesting = String(Boolean(plant));
+  if (plant) {
+    node.dataset.requestingPlant = plant.kind;
+    node.dataset.requestingX = String(plant.x);
+    node.dataset.requestingY = String(plant.y);
+  } else {
+    delete node.dataset.requestingPlant;
+    delete node.dataset.requestingX;
+    delete node.dataset.requestingY;
+  }
+}
+
 function formatTaskHint() {
   const details = ["Commendation: zero incidents"];
-  if (state.fernRequesting) details.push("The fern is asking for water");
+  if (state.requestedPlantId) {
+    const plant = state.mission.scene.plants.find(candidate => candidate.id === state.requestedPlantId);
+    if (plant) details.push(`The ${getPlantName(plant.kind)} is asking for water`);
+  }
   if (state.mission.taskKind === "sorting" && state.task.sorting < state.mission.taskGoal) {
     const tray = ["red", "blue", "gold"][state.mission.sortingSequence[state.task.sorting]];
     if (tray) details.push(`Next tray: ${tray}`);
@@ -175,12 +205,7 @@ function updateMissionProgress() {
   const activityCount = task[mission.taskKind] ?? 0;
   nodes.activityName.textContent = TASK_LABELS[mission.taskKind];
   updateObjective(nodes.coffeeObjective, nodes.coffeeStatus, nodes.coffeeProgress, task.coffee, mission.coffeeGoal);
-  updateObjective(nodes.waterObjective, nodes.waterStatus, nodes.waterProgress, task.water, mission.waterGoal);
   updateObjective(nodes.activityObjective, nodes.activityStatus, nodes.activityProgress, activityCount, mission.taskGoal);
-  nodes.waterObjective.dataset.requesting = String(state.fernRequesting);
-  nodes.waterProgress.textContent = task.water >= mission.waterGoal
-    ? `${task.water}/${mission.waterGoal}`
-    : `${state.fernRequesting ? "Needs water · " : "Waiting · "}${task.water}/${mission.waterGoal}`;
 }
 
 function updateMissionPicker() {
@@ -200,7 +225,7 @@ function refreshMissionPreviews() {
 }
 
 function taskDescription(mission) {
-  return `${mission.coffeeGoal} hot coffees · tap fern · ${TASK_LABELS[mission.taskKind]}`;
+  return `${mission.coffeeGoal} hot coffees · care for plants · ${TASK_LABELS[mission.taskKind]}`;
 }
 
 function updateMissionCards() {
@@ -285,18 +310,21 @@ function selectMission(index, preview = missionPreviews.get(index)) {
   state.score = 0;
   state.incidents = 0;
   state.timeLeft = preview.durationSeconds;
-  state.task = { coffee: 0, water: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 };
+  state.task = { coffee: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 };
   state.spawnClock = 0;
   state.nonHotSpawnStreak = 0;
   state.coldlessSpawnStreak = 0;
-  state.waterRequestClock = 0;
-  state.fernRequesting = false;
-  state.fernWetUntil = 0;
+  state.plantRequestClock = 0;
+  state.plantRequestRemaining = 0;
+  state.plantRequestOrder = [];
+  state.plantRequestIndex = 0;
+  state.requestedPlantId = null;
+  state.wetPlants.clear();
   state.sortingItemSelected = false;
   state.pestClock = 0;
   targets.length = 0;
   particles.length = 0;
-  nodes.plantRequestStatus.textContent = "The fern is resting.";
+  setPlantRequestStatus("The plants are resting.");
   nodes.start.textContent = "Start mission";
   updateMissionDescription();
   updateMissionCards();
@@ -310,16 +338,19 @@ function startMission() {
   state.score = 0;
   state.incidents = 0;
   state.timeLeft = state.mission.durationSeconds;
-  state.task = { coffee: 0, water: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 };
+  state.task = { coffee: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 };
   state.spawnClock = 0;
   state.nonHotSpawnStreak = 0;
   state.coldlessSpawnStreak = 0;
-  state.waterRequestClock = 5;
-  state.fernRequesting = false;
+  state.plantRequestClock = 5;
+  state.plantRequestRemaining = 0;
+  state.plantRequestOrder = state.mission.scene.plants.map(plant => plant.id);
+  state.plantRequestIndex = 0;
+  state.requestedPlantId = null;
+  state.wetPlants.clear();
   state.pestClock = 0;
   state.sortingItemSelected = false;
-  state.fernWetUntil = 0;
-  nodes.plantRequestStatus.textContent = "The fern is resting.";
+  setPlantRequestStatus("The plants are resting.");
   targets.length = 0;
   particles.length = 0;
   state.mode = "running";
@@ -342,12 +373,12 @@ function persistAndFinish(completed) {
   targets.length = 0;
   updateHud();
   if (state.mode === "campaignComplete") {
-    setMessage(`Campaign complete! You are Chief of Everything. The fern gets your office.${saved ? "" : " Progress could not be saved."}`, 99);
+    setMessage(`Campaign complete! You are Chief of Everything. The plants get your office.${saved ? "" : " Progress could not be saved."}`, 99);
   } else if (state.mode === "missionComplete") {
     const earnedBadge = state.progress.perfectMissions.includes(state.mission.index);
     setMessage(`Mission complete! ${earnedBadge ? "Zero-incident commendation earned." : "Try again without incidents for a commendation."}${saved ? "" : " Progress could not be saved."}`, 99);
   } else {
-    setMessage(`Shift over. The phone is still ringing, but at least the fern is hydrated.${saved ? "" : " Progress could not be saved."}`, 99);
+    setMessage(`Shift over. The plants can wait until the next shift.${saved ? "" : " Progress could not be saved."}`, 99);
   }
 }
 
@@ -359,17 +390,52 @@ function tryCompleteMission() {
   return false;
 }
 
-function waterFern() {
-  if (state.mode !== "running" || !state.fernRequesting || state.task.water >= state.mission.waterGoal) return;
-  state.task.water++;
-  state.fernRequesting = false;
+function waterPlant(plant) {
+  if (state.mode !== "running" || state.requestedPlantId !== plant.id) return;
+  state.requestedPlantId = null;
+  state.plantRequestRemaining = 0;
+  state.plantRequestClock = 3;
   state.score += 2;
-  state.fernWetUntil = performance.now() + 1800;
+  state.wetPlants.set(plant.id, performance.now() + 1800);
   audio.play(523.25, .24, "sine", .035);
-  nodes.plantRequestStatus.textContent = "Fern watered. It is happy again.";
-  setMessage("Fern watered! It has canceled its performance review.", 2.3);
+  setPlantRequestStatus(`The ${getPlantName(plant.kind)} is watered and happy again.`);
+  setMessage(`Plant watered! The ${getPlantName(plant.kind)} has canceled its performance review.`, 2.3);
   updateHud();
-  tryCompleteMission();
+}
+
+function requestNextPlantWater() {
+  if (state.plantRequestOrder.length === 0) return;
+  const plantId = state.plantRequestOrder[state.plantRequestIndex % state.plantRequestOrder.length];
+  state.plantRequestIndex++;
+  const plant = state.mission.scene.plants.find(candidate => candidate.id === plantId);
+  if (!plant) return;
+  state.requestedPlantId = plant.id;
+  state.plantRequestRemaining = 8;
+  setPlantRequestStatus(`The ${getPlantName(plant.kind)} needs water. Tap it before the request expires.`, plant);
+  audio.playWaterRequest();
+  setMessage(`The ${getPlantName(plant.kind)} needs water! Tap it before time runs out.`, 4);
+}
+
+function updatePlantRequests(dt) {
+  if (state.requestedPlantId) {
+    state.plantRequestRemaining -= dt;
+    if (state.plantRequestRemaining <= 0) {
+      const plant = state.mission.scene.plants.find(candidate => candidate.id === state.requestedPlantId);
+      const penalty = applyPlantRequestExpiry();
+      state.requestedPlantId = null;
+      state.plantRequestRemaining = 0;
+      state.plantRequestClock = 3;
+      state.score = Math.max(0, state.score + penalty.points);
+      state.timeLeft = Math.max(0, state.timeLeft + penalty.timeDelta);
+      state.incidents += penalty.incidents;
+      setPlantRequestStatus(`The ${getPlantName(plant?.kind)} went unwatered: ${penalty.points} points and ${penalty.timeDelta} seconds.`);
+      setMessage(`Plant request missed: ${penalty.points} points and ${penalty.timeDelta} seconds.`, 3);
+      if (state.timeLeft <= 0) finishFailedMission();
+    }
+  } else {
+    state.plantRequestClock -= dt;
+    if (state.plantRequestClock <= 0) requestNextPlantWater();
+  }
 }
 
 function spawnTarget(now) {
@@ -689,9 +755,9 @@ function drawBackground(now) {
   ctx.fillStyle = office.deskFront;
   ctx.fillRect(0, 417, WIDTH, 123);
 
-  const fernHappy = now < state.fernWetUntil;
   for (const plant of plants) {
-    drawPlant(plant, now, fernHappy && plant.kind === "fern", state.fernRequesting && plant.kind === "fern");
+    const wetUntil = state.wetPlants.get(plant.id) ?? 0;
+    drawPlant(plant, now, now < wetUntil, state.requestedPlantId === plant.id);
   }
   drawActivityStations(now);
   ctx.fillStyle = "#534536";
@@ -1040,7 +1106,7 @@ function finishFailedMission() {
   targets.length = 0;
   nodes.start.textContent = "Play this mission again";
   updateHud();
-  setMessage(`Shift over. The phone is still ringing, but at least the fern is hydrated.${saved ? "" : " Progress could not be saved."}`, 99);
+  setMessage(`Shift over. The plants can wait until the next shift.${saved ? "" : " Progress could not be saved."}`, 99);
 }
 
 function update(dt, now) {
@@ -1051,15 +1117,8 @@ function update(dt, now) {
     finishFailedMission();
     return;
   }
-  if (!state.fernRequesting && state.task.water < state.mission.waterGoal) {
-    state.waterRequestClock -= dt;
-    if (state.waterRequestClock <= 0) {
-      state.fernRequesting = true;
-      nodes.plantRequestStatus.textContent = "The fern needs water now. Tap the plant.";
-      audio.playWaterRequest();
-      setMessage("The fern needs water! Tap it when you can.", 4);
-    }
-  }
+  updatePlantRequests(dt);
+  if (state.mode !== "running") return;
   state.spawnClock -= dt;
   if (state.spawnClock <= 0 && targets.length < state.mission.maxTargets) {
     spawnTarget(now);
@@ -1197,11 +1256,6 @@ canvas.addEventListener("pointerdown", event => {
   if (state.mode !== "running") return;
   event.preventDefault();
   const point = canvasPoint(event);
-  if (state.mission.waterGoal > state.task.water &&
-      point.x >= 646 && point.x <= 738 && point.y >= 326 && point.y <= 404) {
-    waterFern();
-    return;
-  }
   if (tapPrinterPart(point) || tapSortingStation(point)) return;
   for (let index = targets.length - 1; index >= 0; index--) {
     const target = targets[index];
@@ -1210,8 +1264,14 @@ canvas.addEventListener("pointerdown", event => {
     if (dx * dx + dy * dy <= (target.r + 11) ** 2) {
       targets.splice(index, 1);
       hitTarget(target);
-      break;
+      return;
     }
+  }
+  const plant = state.mission.scene.plants.find(candidate =>
+    Math.abs(point.x - candidate.x) <= 24 && point.y >= candidate.y - 65 && point.y <= candidate.y + 15);
+  if (plant) {
+    waterPlant(plant);
+    return;
   }
 });
 

@@ -181,7 +181,6 @@ export function createMission(missionIndex, careerPoints = 0, seed = missionInde
     title,
     durationSeconds: 68 + missionIndex * 4 + Math.floor(random() * 5),
     coffeeGoal: 5 + missionIndex + Math.floor(random() * 2),
-    waterGoal: 1,
     taskKind,
     taskGoal,
     sortingSequence: Object.freeze(sortingSequence),
@@ -393,9 +392,12 @@ export function applyTargetExpiry(kind, mission) {
   return { timeDelta: 0, incidents: kind === "hot" ? 1 : 0 };
 }
 
+export function applyPlantRequestExpiry() {
+  return { points: -2, timeDelta: -2, incidents: 1 };
+}
+
 export function isMissionComplete(mission, progress) {
   return progress.coffee >= mission.coffeeGoal &&
-    progress.water >= mission.waterGoal &&
     progress[mission.taskKind] >= mission.taskGoal;
 }
 
