@@ -6,6 +6,7 @@ import {
   applyTargetExpiry,
   applyTargetHit,
   clampMissionTime,
+  chooseTargetKind,
   createEmptyProgress,
   createMission,
   getAdjacentMissionIndex,
@@ -159,6 +160,25 @@ test("mission time rewards never exceed the duration or fall below zero", () => 
   assert.equal(clampMissionTime(64, 5, 65), 65);
   assert.equal(clampMissionTime(1, -3, 65), 0);
   assert.equal(clampMissionTime(20, 4, 65), 24);
+});
+
+test("hot coffee is guaranteed after at most two non-hot spawn selections", () => {
+  const sequence = [0, .1, .2, .3, .4, .5, .6, .7, .8, .9];
+  let nonHotStreak = 0;
+  const selected = sequence.map(roll => {
+    const kind = chooseTargetKind(roll, "phone", true, nonHotStreak);
+    nonHotStreak = kind === "hot" ? 0 : nonHotStreak + 1;
+    return kind;
+  });
+  assert.ok(selected.some(kind => kind === "phone"));
+  assert.ok(selected.some(kind => kind === "cold"));
+  assert.ok(selected.some(kind => kind === "hot"));
+  for (let index = 2; index < selected.length; index++) {
+    assert.notEqual(selected.slice(index - 2, index + 1).every(kind => kind !== "hot"), true);
+  }
+  assert.equal(chooseTargetKind(0, "phone", true, 2), "hot");
+  assert.throws(() => chooseTargetKind(1, "phone", true), RangeError);
+  assert.throws(() => chooseTargetKind(.5, "phone", true, -1), RangeError);
 });
 
 test("commendations distinguish mission completion, incident-free shifts, and campaign finale", () => {

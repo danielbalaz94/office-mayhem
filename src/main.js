@@ -1,4 +1,4 @@
-import { AmbientAudio } from "./audio.js";
+import { GameAudio } from "./audio.js";
 import { REPORT_PALETTE } from "./palette.js";
 import {
   MISSION_COUNT,
@@ -8,6 +8,7 @@ import {
   applyTargetExpiry,
   applyTargetHit,
   clampMissionTime,
+  chooseTargetKind,
   createEmptyProgress,
   createMission,
   getAdjacentMissionIndex,
@@ -31,12 +32,23 @@ const nodes = {
   level: document.querySelector("#level"),
   missionTitle: document.querySelector("#missionTitle"),
   taskCopy: document.querySelector("#taskCopy"),
-  progress: document.querySelector("#progress"),
-  progressTrack: document.querySelector("#progressTrack"),
+  coffeeObjective: document.querySelector("#coffeeObjective"),
+  coffeeStatus: document.querySelector("#coffeeStatus"),
+  coffeeProgress: document.querySelector("#coffeeProgress"),
+  waterObjective: document.querySelector("#waterObjective"),
+  waterStatus: document.querySelector("#waterStatus"),
+  waterProgress: document.querySelector("#waterProgress"),
+  activityObjective: document.querySelector("#activityObjective"),
+  activityStatus: document.querySelector("#activityStatus"),
+  activityName: document.querySelector("#activityName"),
+  activityProgress: document.querySelector("#activityProgress"),
   taskDetail: document.querySelector("#taskDetail"),
+  plantRequestStatus: document.querySelector("#plantRequestStatus"),
   message: document.querySelector("#message"),
   start: document.querySelector("#start"),
   music: document.querySelector("#music"),
+  volume: document.querySelector("#volume"),
+  volumeValue: document.querySelector("#volumeValue"),
   missionBrowser: document.querySelector("#missionBrowser"),
   missionBrowserButton: document.querySelector("#missionBrowserButton"),
   closeMissionBrowser: document.querySelector("#closeMissionBrowser"),
@@ -48,8 +60,17 @@ const WIDTH = canvas.width;
 const HEIGHT = canvas.height;
 const targets = [];
 const particles = [];
-const audio = new AmbientAudio();
+const audio = new GameAudio();
+const VOLUME_STORAGE_KEY = "office-mayhem-volume";
 const missionPreviews = new Map();
+const storedVolumeValue = localStorage.getItem(VOLUME_STORAGE_KEY);
+const storedVolume = Number(storedVolumeValue);
+const initialVolume = storedVolumeValue !== null && Number.isFinite(storedVolume)
+  ? Math.max(0, Math.min(100, storedVolume))
+  : 65;
+nodes.volume.value = String(initialVolume);
+nodes.volumeValue.textContent = `${initialVolume}%`;
+audio.setVolume(initialVolume / 100);
 const initialProgress = loadProgress();
 const coffeeQuips = [
   "Caffeine secured. Your hands are union-approved!",
@@ -68,6 +89,9 @@ const state = {
   timeLeft: 65,
   task: { coffee: 0, water: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 },
   spawnClock: 0,
+  nonHotSpawnStreak: 0,
+  waterRequestClock: 0,
+  fernRequesting: false,
   lastFrame: 0,
   messageClock: 0,
   shake: 0,
@@ -121,13 +145,33 @@ function setMessage(text, seconds = 2.3) {
 }
 
 function formatTaskHint() {
-  const { mission, task } = state;
-  const count = task[mission.taskKind] ?? 0;
-  let detail = `${TASK_LABELS[mission.taskKind]} (${count}/${mission.taskGoal})`;
-  if (mission.taskKind === "sorting" && count < mission.taskGoal) {
-    detail += ` · Next tray: ${["red", "blue", "gold"][mission.sortingSequence[count]]}`;
+  const details = ["Commendation: zero incidents"];
+  if (state.fernRequesting) details.push("The fern is asking for water");
+  if (state.mission.taskKind === "sorting" && state.task.sorting < state.mission.taskGoal) {
+    const tray = ["red", "blue", "gold"][state.mission.sortingSequence[state.task.sorting]];
+    if (tray) details.push(`Next tray: ${tray}`);
   }
-  return `Tap the fern (${task.water}/${mission.waterGoal}) · ${detail} · Commendation: zero incidents`;
+  return details.join(" · ");
+}
+
+function updateObjective(node, statusNode, progressNode, current, goal) {
+  const complete = current >= goal;
+  node.dataset.complete = String(complete);
+  statusNode.textContent = complete ? "✓" : "○";
+  progressNode.textContent = `${current}/${goal}`;
+}
+
+function updateMissionProgress() {
+  const { mission, task } = state;
+  const activityCount = task[mission.taskKind] ?? 0;
+  nodes.activityName.textContent = TASK_LABELS[mission.taskKind];
+  updateObjective(nodes.coffeeObjective, nodes.coffeeStatus, nodes.coffeeProgress, task.coffee, mission.coffeeGoal);
+  updateObjective(nodes.waterObjective, nodes.waterStatus, nodes.waterProgress, task.water, mission.waterGoal);
+  updateObjective(nodes.activityObjective, nodes.activityStatus, nodes.activityProgress, activityCount, mission.taskGoal);
+  nodes.waterObjective.dataset.requesting = String(state.fernRequesting);
+  nodes.waterProgress.textContent = task.water >= mission.waterGoal
+    ? `${task.water}/${mission.waterGoal}`
+    : `${state.fernRequesting ? "Needs water · " : "Waiting · "}${task.water}/${mission.waterGoal}`;
 }
 
 function updateMissionPicker() {
@@ -207,9 +251,7 @@ function updateHud() {
   nodes.incidents.textContent = String(state.incidents);
   nodes.level.textContent = `${mission.index + 1}/${MISSION_COUNT}`;
   nodes.missionTitle.textContent = `Mission ${mission.index + 1} · ${mission.title}`;
-  nodes.progressTrack.setAttribute("aria-valuemax", String(mission.coffeeGoal));
-  nodes.progressTrack.setAttribute("aria-valuenow", String(task.coffee));
-  nodes.progress.style.width = `${Math.min(100, task.coffee / mission.coffeeGoal * 100)}%`;
+  updateMissionProgress();
   nodes.taskDetail.textContent = formatTaskHint();
   const resultVisible = state.mode === "missionComplete" || state.mode === "campaignComplete" ||
     state.mode === "failed" || state.mode === "browsing";
@@ -242,12 +284,20 @@ function startMission() {
   state.timeLeft = state.mission.durationSeconds;
   state.task = { coffee: 0, water: 0, phone: 0, reports: 0, printer: 0, sorting: 0, pests: 0 };
   state.spawnClock = 0;
+  state.nonHotSpawnStreak = 0;
+  state.waterRequestClock = 5;
+  state.fernRequesting = false;
   state.pestClock = 0;
   state.sortingItemSelected = false;
   state.fernWetUntil = 0;
+  nodes.plantRequestStatus.textContent = "The fern is resting.";
   targets.length = 0;
   particles.length = 0;
   state.mode = "running";
+  audio.prepare().catch(error => {
+    console.error("Could not initialize game audio.", error);
+    setMessage("This browser could not start game audio.", 3);
+  });
   nodes.start.textContent = "Restart mission";
   setMessage("Go! The phones are buzzing and the fern has a calendar invite.", 3);
   updateHud();
@@ -257,6 +307,7 @@ function startMission() {
 function persistAndFinish(completed) {
   const saved = saveProgress(completed);
   state.mode = getMissionEndState(state.mission.index, completed);
+  if (completed) audio.playMissionComplete();
   nodes.start.textContent = state.mode === "campaignComplete" ? "Replay a mission" : "Play this mission again";
   state.timeLeft = Math.max(0, state.timeLeft);
   targets.length = 0;
@@ -280,11 +331,13 @@ function tryCompleteMission() {
 }
 
 function waterFern() {
-  if (state.mode !== "running" || state.task.water >= state.mission.waterGoal) return;
+  if (state.mode !== "running" || !state.fernRequesting || state.task.water >= state.mission.waterGoal) return;
   state.task.water++;
+  state.fernRequesting = false;
   state.score += 2;
   state.fernWetUntil = performance.now() + 1800;
   audio.play(523.25, .24, "sine", .035);
+  nodes.plantRequestStatus.textContent = "Fern watered. It is happy again.";
   setMessage("Fern watered! It has canceled its performance review.", 2.3);
   updateHud();
   tryCompleteMission();
@@ -292,15 +345,11 @@ function waterFern() {
 
 function spawnTarget(now) {
   const { mission, task } = state;
-  const canReport = task.reports < mission.taskGoal;
-  const canPhone = task.phone < mission.taskGoal;
-  const roll = Math.random();
-  let kind = "hot";
-  if (mission.taskKind === "reports" && canReport && roll < .31) kind = "report";
-  else if (mission.taskKind === "phone" && canPhone && roll < .3) kind = "phone";
-  else if (roll < .13) kind = "report";
-  else if (roll < .25) kind = "phone";
-  else if (roll < .5) kind = "cold";
+  const taskPending = mission.taskKind === "reports"
+    ? task.reports < mission.taskGoal
+    : mission.taskKind === "phone" && task.phone < mission.taskGoal;
+  const kind = chooseTargetKind(Math.random(), mission.taskKind, taskPending, state.nonHotSpawnStreak);
+  state.nonHotSpawnStreak = kind === "hot" ? 0 : state.nonHotSpawnStreak + 1;
   const golden = kind === "hot" && Math.random() < .13;
   const radius = kind === "phone" ? 24 : kind === "report" ? 27 : golden ? 28 : randomBetween(22, 30);
   const angle = randomBetween(0, Math.PI * 2);
@@ -391,6 +440,20 @@ function drawBackground(now) {
     ctx.ellipse(0, -20, 8, 21, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+  }
+  if (state.fernRequesting) {
+    ctx.fillStyle = "#203229";
+    ctx.beginPath();
+    ctx.roundRect(649, 304, 84, 24, 8);
+    ctx.fill();
+    ctx.strokeStyle = "#ffd18a";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = "#ffd18a";
+    ctx.font = "bold 11px Trebuchet MS, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("WATER ME!", 691, 320);
+    ctx.textAlign = "start";
   }
   drawActivityStations(now);
   ctx.fillStyle = "#534536";
@@ -751,6 +814,15 @@ function update(dt, now) {
     finishFailedMission();
     return;
   }
+  if (!state.fernRequesting && state.task.water < state.mission.waterGoal) {
+    state.waterRequestClock -= dt;
+    if (state.waterRequestClock <= 0) {
+      state.fernRequesting = true;
+      nodes.plantRequestStatus.textContent = "The fern needs water now. Tap the plant.";
+      audio.playWaterRequest();
+      setMessage("The fern needs water! Tap it when you can.", 4);
+    }
+  }
   state.spawnClock -= dt;
   if (state.spawnClock <= 0 && targets.length < state.mission.maxTargets) {
     spawnTarget(now);
@@ -929,13 +1001,24 @@ nodes.nextMission.addEventListener("click", () => moveMission(1));
 nodes.start.addEventListener("click", startMission);
 nodes.music.addEventListener("click", async () => {
   try {
-    const enabled = await audio.toggle();
+    const enabled = await audio.toggleMusic();
     nodes.music.setAttribute("aria-pressed", String(enabled));
-    nodes.music.textContent = enabled ? "♫ Ambient: On" : "♫ Ambient: Off";
-    setMessage(enabled ? "Slow office-day ambience activated." : "Quiet mode. The fern approves.", 2.5);
+    nodes.music.textContent = enabled ? "♫ Music: On" : "♫ Music: Off";
+    setMessage(enabled ? "The original office tune is back." : "Quiet mode. The fern approves.", 2.5);
   } catch (error) {
-    console.error("Could not initialize ambient audio.", error);
-    setMessage("This browser could not start ambient audio.", 3);
+    console.error("Could not initialize music.", error);
+    setMessage("This browser could not start music.", 3);
+  }
+});
+nodes.volume.addEventListener("input", () => {
+  const volume = Number(nodes.volume.value);
+  audio.setVolume(volume / 100);
+  nodes.volumeValue.textContent = `${volume}%`;
+  try {
+    localStorage.setItem(VOLUME_STORAGE_KEY, String(volume));
+  } catch (error) {
+    console.error("Could not save the Office Mayhem volume setting.", error);
+    setMessage("Volume changed, but the setting could not be saved.", 3);
   }
 });
 

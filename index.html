@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#172127">
   <title>Office Mayhem</title>
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./src/styles.css">
 </head>
 <body>
   <main class="app">
     <header class="masthead">
       <p class="eyebrow">A very serious workplace simulation</p>
       <h1>OFFICE <span>MAYHEM</span></h1>
-      <p class="subtitle">Catch hot coffee. Water the fern. Silence the group chat.</p>
+      <p class="subtitle">Catch hot coffee. Water the fern when it asks. Silence the group chat.</p>
     </header>
     <section class="game-card" aria-label="Office Mayhem game">
       <div class="scoreboard" role="group" aria-label="Live game statistics">
@@ -22,31 +22,54 @@
         <div class="stat"><span class="stat-label">Incidents</span><span class="stat-value" id="incidents">0</span></div>
         <div class="stat"><span class="stat-label">Mission</span><span class="stat-value" id="level">1/6</span></div>
       </div>
-      <section class="mission-panel" aria-label="Mission objectives">
+      <section class="mission-panel" aria-label="Current mission">
         <div class="mission-copy">
           <p class="mission-title" id="missionTitle">Mission 1 · Fern &amp; Furious</p>
           <p class="task-copy" id="taskCopy">Catch 6 hot coffees</p>
         </div>
-        <div class="progress-block">
-          <div class="task-progress" id="progressTrack" role="progressbar" aria-label="Hot coffee objective" aria-valuemin="0" aria-valuemax="6" aria-valuenow="0">
-            <div class="task-progress-fill" id="progress"></div>
-          </div>
-          <p class="task-detail" id="taskDetail">Water the fern (0/1) · Silence ringing phones (0/1)</p>
-        </div>
         <button id="missionBrowserButton" class="action-button mission-browser-button" type="button">Missions</button>
       </section>
-      <div class="stage-wrap">
-        <canvas id="game" width="960" height="540"
-          aria-label="Play the office mission: catch hot coffee, avoid iced coffee, and complete the mission activity"
-          tabindex="0"></canvas>
-        <span class="stage-note"><span>HOT COFFEE = CATCH</span> · <span class="report-key">YELLOW REPORT = BONUS</span> · <span class="phone-key">TAP THE FERN TO WATER</span></span>
+      <div class="gameplay-layout">
+        <aside class="mission-progress" aria-label="Current mission objective progress">
+          <p class="mission-progress-title">Mission objectives</p>
+          <ul class="objective-list">
+            <li id="coffeeObjective" class="objective-item" data-objective="coffee">
+              <span id="coffeeStatus" class="objective-status" aria-hidden="true">○</span>
+              <span class="objective-name">Hot coffee</span>
+              <span id="coffeeProgress" class="objective-count">0/6</span>
+            </li>
+            <li id="waterObjective" class="objective-item" data-objective="water">
+              <span id="waterStatus" class="objective-status" aria-hidden="true">○</span>
+              <span class="objective-name">Water the fern</span>
+              <span id="waterProgress" class="objective-count">Waiting · 0/1</span>
+            </li>
+            <li id="activityObjective" class="objective-item" data-objective="activity">
+              <span id="activityStatus" class="objective-status" aria-hidden="true">○</span>
+              <span id="activityName" class="objective-name">Silence ringing phones</span>
+              <span id="activityProgress" class="objective-count">0/1</span>
+            </li>
+          </ul>
+          <p id="plantRequestStatus" class="plant-request-status" role="status" aria-live="polite">The fern is resting.</p>
+          <p class="task-detail" id="taskDetail">Commendation: zero incidents</p>
+        </aside>
+        <div class="stage-wrap">
+          <canvas id="game" width="960" height="540"
+            aria-label="Play the office mission: catch hot coffee, avoid iced coffee, and complete the mission activity"
+            tabindex="0"></canvas>
+          <span class="stage-note"><span>HOT COFFEE = CATCH</span> · <span class="report-key">YELLOW REPORT = BONUS</span> · <span class="phone-key">WATER THE FERN WHEN IT ASKS</span></span>
+        </div>
       </div>
       <div class="controls">
         <p class="message" id="message" role="status">Select a mission to begin. The fern has already sent a calendar invite.</p>
         <div class="control-buttons">
           <button id="previousMission" class="action-button nav-button" type="button" aria-label="Previous mission" disabled>←</button>
           <button id="nextMission" class="action-button nav-button" type="button" aria-label="Next mission" disabled>→</button>
-          <button id="music" class="music-button" type="button" aria-pressed="false">♫ Ambient: Off</button>
+          <label class="volume-control" for="volume">
+            <span>Volume</span>
+            <input id="volume" type="range" min="0" max="100" value="65" aria-label="Sound volume">
+            <output id="volumeValue" for="volume">65%</output>
+          </label>
+          <button id="music" class="music-button" type="button" aria-pressed="false">♫ Music: Off</button>
           <button id="start" class="primary-button" type="button">Start mission</button>
         </div>
       </div>
@@ -56,7 +79,7 @@
       <span><strong>Iced coffee</strong> = avoid (−2 sec)</span>
       <span class="report-key"><strong>Yellow report mug</strong> = bonus</span>
       <span class="phone-key"><strong>Ringing phone</strong> = silence it</span>
-      <span><strong>Fern</strong> = tap the plant to water</span>
+      <span><strong>Fern</strong> = tap when it asks for water</span>
     </p>
   </main>
   <dialog id="missionBrowser" class="mission-browser" aria-labelledby="missionBrowserTitle">

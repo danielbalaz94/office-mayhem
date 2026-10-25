@@ -186,6 +186,30 @@ export function getTargetSpeed(baseSpeed, mission, kind, golden = false) {
   return baseSpeed * mission.speedMultiplier * (bonus ? mission.bonusSpeedMultiplier : 1);
 }
 
+export function chooseTargetKind(roll, taskKind, taskPending, nonHotStreak = 0) {
+  if (!Number.isFinite(roll) || roll < 0 || roll >= 1) {
+    throw new RangeError("Target roll must be between 0 (inclusive) and 1 (exclusive).");
+  }
+  if (!Number.isInteger(nonHotStreak) || nonHotStreak < 0) {
+    throw new RangeError("Non-hot target streak must be a non-negative integer.");
+  }
+  if (nonHotStreak >= 2) return "hot";
+
+  const missionTarget = taskPending && taskKind === "phone"
+    ? "phone"
+    : taskPending && taskKind === "reports"
+      ? "report"
+      : null;
+  const missionTargetChance = missionTarget ? .28 : 0;
+  if (missionTarget && roll < missionTargetChance) return missionTarget;
+
+  const regularRoll = (roll - missionTargetChance) / (1 - missionTargetChance);
+  if (regularRoll < .15) return "cold";
+  if (regularRoll < .28) return "report";
+  if (regularRoll < .41) return "phone";
+  return "hot";
+}
+
 export function recordMissionResult(progress, missionIndex, score, completed = true, incidents = 0) {
   assertMissionIndex(missionIndex);
   if (!Number.isSafeInteger(score) || score < 0) {

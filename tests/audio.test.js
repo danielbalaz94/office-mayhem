@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AmbientAudio } from "../src/audio.js";
+import { GameAudio } from "../src/audio.js";
 
 class FakeParameter {
   constructor() {
@@ -16,10 +16,6 @@ class FakeParameter {
   setTargetAtTime(value, time, constant) {
     this.targets.push({ value, time, constant });
     this.value = value;
-  }
-
-  cancelScheduledValues(time) {
-    this.cancelledAt = time;
   }
 
   exponentialRampToValueAtTime(value, time) {
@@ -51,34 +47,63 @@ class FakeContext {
   }
 }
 
-test("ambient toggle creates a slow pad, changes chords gradually, and fades out", async () => {
+function createAudio(context = new FakeContext()) {
+  return new GameAudio({ AudioContext: class { constructor() { return context; } } });
+}
+
+test("music is opt-in with a slower warm arrangement of the original melody", async () => {
   const context = new FakeContext();
-  const audio = new AmbientAudio({ AudioContext: class { constructor() { return context; } } });
-  assert.equal(await audio.toggle(), true);
-  assert.equal(audio.voices.length, 3);
-  assert.equal(audio.master.gain.targets.at(-1).constant, 1.4);
-
-  context.currentTime = 12;
+  const audio = createAudio(context);
+  assert.equal(audio.musicEnabled, false);
+  assert.equal(await audio.toggleMusic(), true);
   audio.update();
-  assert.equal(audio.voices[0].oscillator.frequency.targets.at(-1).constant, 2.8);
+  assert.equal(context.oscillators[0].frequency.value, 659.25 / 2);
+  assert.equal(context.oscillators[0].type, "sine");
+  assert.equal(context.oscillators[0].destination.destination, audio.master);
+  assert.equal(Number((audio.nextNoteAt - .05).toFixed(2)), .36);
+  assert.deepEqual(context.oscillators.slice(2, 5).map(oscillator => oscillator.frequency.value), [110, 164.81, 220]);
 
-  assert.equal(await audio.toggle(), false);
-  assert.equal(audio.master.gain.targets.at(-1).value, 0);
-  assert.equal(context.oscillators[0].stoppedAt, 14.5);
+  context.currentTime = .4;
+  audio.update();
+  const secondMelodyNote = context.oscillators.find(oscillator =>
+    oscillator.frequency.value === 783.99 / 2 && oscillator.startedAt > .05);
+  assert.ok(secondMelodyNote);
+  assert.ok(Math.abs(secondMelodyNote.startedAt - .41) < .001);
+  assert.equal(await audio.toggleMusic(), false);
+  const scheduledCount = context.oscillators.length;
+  context.currentTime = 1;
+  audio.update();
+  assert.equal(context.oscillators.length, scheduledCount);
 });
 
-test("sound effects remain separate from the ambient mute control", async () => {
+test("master volume controls locally generated music and sound effects", async () => {
   const context = new FakeContext();
-  const audio = new AmbientAudio({ AudioContext: class { constructor() { return context; } } });
-  await audio.toggle();
-  await audio.toggle();
+  const audio = createAudio(context);
+  audio.setVolume(.4);
+  await audio.prepare();
+  assert.equal(audio.master.gain.value, .4);
+  audio.setVolume(.4);
   audio.play(440);
   const effect = context.oscillators.at(-1);
-  assert.equal(effect.destination.destination, context.destination);
+  assert.equal(effect.destination.destination, audio.master);
+  assert.equal(audio.master.gain.targets.at(-1).value, .4);
+});
+
+test("plant request and mission completion cues use generated tones", async () => {
+  const context = new FakeContext();
+  const audio = createAudio(context);
+  await audio.prepare();
+  audio.playWaterRequest();
+  assert.deepEqual(context.oscillators.map(oscillator => oscillator.frequency.value), [784, 1046.5]);
+
+  context.oscillators.length = 0;
+  audio.playMissionComplete();
+  assert.deepEqual(context.oscillators.map(oscillator => oscillator.frequency.value), [523.25, 659.25, 783.99, 1046.5]);
+  assert.ok(context.oscillators.every(oscillator => oscillator.destination.destination === audio.master));
 });
 
 test("audio controls report when the browser has no Web Audio support", async () => {
-  const audio = new AmbientAudio({});
-  assert.equal(await audio.toggle(), false);
-  assert.equal(audio.enabled, false);
+  const audio = new GameAudio({});
+  assert.equal(await audio.toggleMusic(), false);
+  assert.equal(audio.musicEnabled, false);
 });
